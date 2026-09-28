@@ -418,32 +418,39 @@
   }
 
 async function queueSync() {
-  if (!state.settings || !state.settings.syncUrl) return;
-  try {
-    const payload = {
-      transactions: state.transactions || [],
-      // include client categories/budgets/goals so server persists them; server will compute loans authoritatively
-      categories: state.categories || [],
-      budgets: state.budgets || [],
-      goals: state.goals || []
-    };
-    const res = await api('replaceAll', payload);
-    // server will respond with { ok:true, message:'Replaced data', data: { transactions, loans, categories, budgets, goals, revision } }
-    if (res && res.data) {
-      // update client state using authoritative server data
-      state.transactions = res.data.transactions || state.transactions || [];
-      state.loans = res.data.loans || state.loans || [];
-      state.categories = res.data.categories || state.categories || [];
-      state.budgets = res.data.budgets || state.budgets || [];
-      state.goals = res.data.goals || state.goals || [];
-      saveState();
-      renderAll();
-    }
-    toast('Pushed changes to sheet');
-  } catch (e) {
-    console.warn('sync failed', e);
-    toast('Push failed');
+
+  if (!state.settings?.syncUrl) {
+    throw new Error('No URL');
   }
+
+  const payload = {
+    transactions: state.transactions || [],
+    categories: state.categories || [],
+    budgets: state.budgets || [],
+    goals: state.goals || []
+  };
+
+  const res = await api(
+    'replaceAll',
+    payload
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      res.error || 'Push failed'
+    );
+  }
+
+  state.transactions = res.data.transactions || [];
+  state.loans = res.data.loans || [];
+  state.categories = res.data.categories || [];
+  state.budgets = res.data.budgets || [];
+  state.goals = res.data.goals || [];
+
+  saveState();
+  renderAll();
+
+  return true;
 }
 
   // --- form submit and tab logic (keeps existing behavior) ---
@@ -583,21 +590,44 @@ async function queueSync() {
       state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
       try { await queueSync(); toast('Test sync done'); } catch (e) { toast('Test sync failed'); }
     });
-    $('pullFromSheets')?.addEventListener('click', async () => {
-      const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
-      state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
-      try {
-        const res = await api('getAll');
-        if (res && res.data) {
-          state.transactions = res.data.transactions || state.transactions || [];
-          state.loans = res.data.loans || state.loans || [];
-          state.categories = res.data.categories || state.categories || [];
-          state.budgets = res.data.budgets || state.budgets || [];
-          state.goals = res.data.goals || state.goals || [];
-          saveState(); renderAll(); toast('Pulled from sheet');
-        } else toast('No data from sheet');
-      } catch (e) { console.warn('pull failed', e); toast('Pull failed'); }
-    });
+$('pullFromSheets')?.addEventListener('click', async () => {
+  const url = ($('syncUrlInput')?.value || '').trim();
+
+  if (!url) {
+    toast('Enter Apps Script URL first');
+    return;
+  }
+
+  state.settings.syncUrl = url;
+  saveState();
+
+  try {
+
+    const res = await fetch(
+      `${url}?action=getAll`
+    ).then(r => r.json());
+
+    if (res?.ok && res?.data) {
+
+      state.transactions = res.data.transactions || [];
+      state.loans = res.data.loans || [];
+      state.categories = res.data.categories || defaultCategories();
+      state.budgets = res.data.budgets || [];
+      state.goals = res.data.goals || [];
+
+      saveState();
+      renderAll();
+
+      toast('Pull completed');
+    } else {
+      toast('No data found');
+    }
+
+  } catch (err) {
+    console.error(err);
+    toast('Pull failed');
+  }
+});
 
     $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); renderAll(); toast('Cleared'); });
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
