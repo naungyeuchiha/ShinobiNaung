@@ -406,22 +406,38 @@
   }
 
   // API helpers
-  async function api(action, payload = {}) {
-    if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
-    const r = await fetch(state.settings.syncUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload })
-    });
-    if (!r.ok) throw new Error('Sync failed');
-    return r.json();
-  }
-
-async function queueSync() {
+async function api(action, payload = {}) {
 
   if (!state.settings?.syncUrl) {
-    throw new Error('No URL');
+    throw new Error('Sync URL missing');
   }
+
+  const response = await fetch(
+    state.settings.syncUrl,
+    {
+      method: 'POST',
+      mode: 'cors',
+      cache: 'no-cache',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action,
+        payload
+      })
+    }
+  );
+
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text);
+  }
+  catch (err) {
+    console.error('SERVER RESPONSE:', text);
+    throw new Error(text);
+  }
+}
 
   const payload = {
     transactions: state.transactions || [],
