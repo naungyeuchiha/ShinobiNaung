@@ -633,7 +633,6 @@
     if (recentTbody) {
       recentTbody.innerHTML = xs.slice(0,8).map(tx => {
         const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
-        // removed delete button per request; keep last cell empty to preserve layout
         return `<tr>
           <td>${esc(tx.date || '')}</td>
           <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
@@ -646,12 +645,12 @@
     if (txTbody) {
       txTbody.innerHTML = xs.map(tx => {
         const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
-        // removed delete button per request; keep last cell empty to preserve layout
+        // ADD Delete button in Transactions (History) table only
         return `<tr>
           <td>${esc(tx.date || '')}</td>
           <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
           <td>${right}</td>
-          <td></td>
+          <td><button data-remove="${tx.id}" aria-label="Delete transaction" class="small delete">Delete</button></td>
         </tr>`;
       }).join('');
     }
