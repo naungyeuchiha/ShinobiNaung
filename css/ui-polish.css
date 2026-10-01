@@ -10,3 +10,16 @@
 .quick-actions .label { font-size: 11px; margin-top: 4px; display:block; text-align:center; }
 .header-stat { text-align:center; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Small / delete button polish */
+button.small {
+  transition: background .12s ease, color .12s ease, transform .08s ease;
+}
+button.small:active { transform: translateY(1px); }
+button.small.delete { opacity: 0.95; }
+
+/* Make table small buttons consistent with polishes */
+.table button {
+  transition: background .12s ease, transform .08s ease;
+}
+.table button:active { transform: translateY(1px); }
