@@ -87,7 +87,7 @@
 
             <div style="height:12px"></div>
 
-            <!-- NOTE: Budget summary moved to Dashboard per your request; keep this area minimal on Home -->
+            <!-- NOTE: Budget summary moved to Dashboard per request; keep placeholder hidden on Home -->
             <div id="budgetPanel-home-placeholder" class="panel" style="display:none;">
               <h3>Budgets</h3>
               <div id="budgetReport" class="muted">No budgets set</div>
@@ -95,10 +95,7 @@
           </div>
 
           <aside>
-            <div id="loanBI" class="panel" aria-live="polite">
-              <h4>Loan Analysis</h4>
-            </div>
-
+            <!-- Loan Analysis removed from Home and moved to Dashboard -->
             <div style="height:12px"></div>
 
             <div id="dailyBudgets" class="panel">
@@ -108,7 +105,7 @@
 
             <div style="height:12px"></div>
 
-            <!-- NOTE: Goals moved to Dashboard per your request; leave placeholder here so settings still work -->
+            <!-- Goals placeholder on Home (moved to Dashboard) -->
             <div id="goalsPanel-home-placeholder" class="panel" style="display:none">
               <h4>Goals</h4>
               <div id="goalsList" class="muted">No goals yet</div>
@@ -190,7 +187,6 @@
           <canvas id="chart" aria-hidden="true"></canvas>
         </div>
 
-        <!-- Insert Budget summary and Goals here (moved from Home) -->
         <div style="height:12px"></div>
 
         <div class="cols">
@@ -202,6 +198,13 @@
           </div>
 
           <aside>
+            <!-- Loan Analysis moved to Dashboard -->
+            <div id="loanBI" class="panel" aria-live="polite">
+              <h4>Loan Analysis</h4>
+            </div>
+
+            <div style="height:12px"></div>
+
             <div id="goalsPanel" class="panel">
               <h4>Goals</h4>
               <div id="goalsList" class="muted">No goals yet</div>
