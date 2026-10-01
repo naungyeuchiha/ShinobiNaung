@@ -87,7 +87,8 @@
 
             <div style="height:12px"></div>
 
-            <div id="budgetPanel" class="panel">
+            <!-- NOTE: Budget summary moved to Dashboard per your request; keep this area minimal on Home -->
+            <div id="budgetPanel-home-placeholder" class="panel" style="display:none;">
               <h3>Budgets</h3>
               <div id="budgetReport" class="muted">No budgets set</div>
             </div>
@@ -107,7 +108,8 @@
 
             <div style="height:12px"></div>
 
-            <div id="goalsPanel" class="panel">
+            <!-- NOTE: Goals moved to Dashboard per your request; leave placeholder here so settings still work -->
+            <div id="goalsPanel-home-placeholder" class="panel" style="display:none">
               <h4>Goals</h4>
               <div id="goalsList" class="muted">No goals yet</div>
             </div>
@@ -186,6 +188,25 @@
         <div class="panel" style="margin-top:12px;">
           <h2>Money flowing trend</h2>
           <canvas id="chart" aria-hidden="true"></canvas>
+        </div>
+
+        <!-- Insert Budget summary and Goals here (moved from Home) -->
+        <div style="height:12px"></div>
+
+        <div class="cols">
+          <div>
+            <div id="budgetPanel" class="panel">
+              <h3>Budgets</h3>
+              <div id="budgetReport" class="muted">No budgets set</div>
+            </div>
+          </div>
+
+          <aside>
+            <div id="goalsPanel" class="panel">
+              <h4>Goals</h4>
+              <div id="goalsList" class="muted">No goals yet</div>
+            </div>
+          </aside>
         </div>
       </section>
 
