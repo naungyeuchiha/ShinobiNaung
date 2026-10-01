@@ -150,3 +150,55 @@ button.primary { background: var(--accent); color: #fff; border: none; padding: 
 /* utility */
 .hidden { display: none !important; }
 .sr-only { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+
+/* ---------------------------
+   Small / action / delete button styles
+   Keep styles theme-aware by using CSS variables.
+   These are minimal, non-invasive styles to align small buttons with theme.
+   --------------------------- */
+
+/* Generic small button used in settings and row actions */
+button.small {
+  font-size: .85rem;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Delete/negative action style — subtle, theme-aware */
+button.small.delete,
+button[data-remove] {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* A slightly stronger hover for delete to make affordance clear without changing theme */
+button.small.delete:hover,
+button[data-remove]:hover {
+  background: rgba(220, 38, 38, 0.08); /* uses a faint red accent */
+  color: var(--danger);
+}
+
+/* Ensure delete button does not produce large box-shadows */
+button.small.delete,
+button[data-remove] {
+  box-shadow: none;
+}
+
+/* Keep table buttons aligned and compact */
+.table button {
+  font-size: .9rem;
+  padding: 6px 8px;
+  border-radius: 8px;
+  min-width: 56px;
+}
+
+/* In dark mode ensure border and hover are visible */
+body.dark button.small.delete,
+body.dark button[data-remove] {
+  border-color: rgba(255,255,255,0.04);
+}
