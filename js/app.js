@@ -594,46 +594,31 @@
     }
   }
 
-  // API helpers
-  async function api(action, payload = {}) {
-    if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
-    const r = await fetch(state.settings.syncUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, payload })
-    });
-    if (!r.ok) throw new Error('Sync failed');
-    return r.json();
+// Replace existing api() with this version (safe, form-encoded POST to avoid CORS preflight)
+async function api(action, payload = {}) {
+  if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
+
+  // Use URLSearchParams so the request is application/x-www-form-urlencoded (CORS simple)
+  const params = new URLSearchParams();
+  params.append('action', action);
+  // payload may be large; stringify it
+  params.append('payload', JSON.stringify(payload));
+
+  const r = await fetch(state.settings.syncUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: params.toString()
+  });
+
+  if (!r.ok) {
+    // try to read server error message
+    let txt = await r.text().catch(()=>null);
+    throw new Error('Sync failed' + (txt ? (': ' + txt) : ''));
   }
 
-  async function queueSync() {
-    if (!state.settings || !state.settings.syncUrl) return;
-    try {
-      const payload = {
-        transactions: state.transactions || [],
-        // include client categories/budgets/goals so server persists them; server will compute loans authoritatively
-        categories: state.categories || [],
-        budgets: state.budgets || [],
-        goals: state.goals || []
-      };
-      const res = await api('replaceAll', payload);
-      // server will respond with { ok:true, message:'Replaced data', data: { transactions, loans, categories, budgets, goals, revision } }
-      if (res && res.data) {
-        // update client state using authoritative server data
-        state.transactions = res.data.transactions || state.transactions || [];
-        state.loans = res.data.loans || state.loans || [];
-        state.categories = res.data.categories || state.categories || [];
-        state.budgets = res.data.budgets || state.budgets || [];
-        state.goals = res.data.goals || state.goals || [];
-        saveState();
-        renderAll();
-      }
-      toast('Pushed changes to sheet');
-    } catch (e) {
-      console.warn('sync failed', e);
-      toast('Push failed');
-    }
-  }
+  // Server returns JSON body like { ok: true, data: { ... } }
+  return r.json();
+}
 
   // --- form submit and tab logic (keeps existing behavior) ---
   async function saveTransactionForm(e) {
