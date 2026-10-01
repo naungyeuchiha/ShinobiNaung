@@ -74,7 +74,10 @@
       if (!tx.createdAt) { tx.createdAt = Date.now(); changed = true; }
       if (!tx.date) { tx.date = today; changed = true; }
     });
-    if (changed) saveState();
+    if (changed) {
+      saveState();
+      scheduleSync();
+    }
   }
 
   function currentMonth() { return state.reportMonth || today.slice(0,7); }
@@ -114,6 +117,7 @@
       renderCategoriesList();
       populateCategories();
       fillCategorySelects();
+      scheduleSync();
       toast('Category updated');
     }));
     holder.querySelectorAll('button.delete').forEach(btn => btn.addEventListener('click', e => {
@@ -125,6 +129,7 @@
       renderCategoriesList();
       populateCategories();
       fillCategorySelects();
+      scheduleSync();
       toast('Category deleted');
     }));
     fillCategorySelects();
@@ -138,6 +143,7 @@
     if (state.categories.some(c => c.name.toLowerCase() === name.toLowerCase() && c.type === type)) { toast('Category exists'); return; }
     state.categories.push({ name, type, createdAt: new Date().toISOString() });
     saveState();
+    scheduleSync();
     $('newCategoryName').value = '';
     renderCategoriesList();
     populateCategories();
@@ -149,6 +155,7 @@
     if (!confirm('Reset categories to defaults? This will replace your categories list.')) return;
     state.categories = defaultCategories();
     saveState();
+    scheduleSync();
     renderCategoriesList();
     populateCategories();
     fillCategorySelects();
@@ -193,6 +200,7 @@
       if (isNaN(n) || n < 0) { toast('Invalid amount'); return; }
       state.budgets[idx].amount = n;
       saveState();
+      scheduleSync();
       renderBudgetsList();
       toast('Budget updated');
     }));
@@ -202,6 +210,7 @@
       if (!confirm(`Delete budget for ${b.category}?`)) return;
       state.budgets.splice(idx,1);
       saveState();
+      scheduleSync();
       renderBudgetsList();
       toast('Budget deleted');
     }));
@@ -221,6 +230,7 @@
       state.budgets.push({ id: uid('bud'), category, amount, createdAt: new Date().toISOString() });
     }
     saveState();
+    scheduleSync();
     $('newBudgetAmount').value = '';
     renderBudgetsList();
     toast('Budget saved');
@@ -230,6 +240,7 @@
     if (!confirm('Clear all budgets?')) return;
     state.budgets = [];
     saveState();
+    scheduleSync();
     renderBudgetsList();
     toast('All budgets cleared');
   }
@@ -294,7 +305,10 @@
         changed = true;
       }
     });
-    if (changed) saveState();
+    if (changed) {
+      saveState();
+      scheduleSync();
+    }
   }
 
   function applyRepayments() {
@@ -314,7 +328,10 @@
         }
       }
     });
-    if (changed) saveState();
+    if (changed) {
+      saveState();
+      scheduleSync();
+    }
   }
 
   function renderLoanSummary() {
@@ -636,22 +653,22 @@
     // If parsed JSON available return it, otherwise attempt to return text wrapped
     if (parsed) return parsed;
     try {
-      // if remote returns plain JSON-like text, try JSON.parse again
       return { ok: true, data: text ? safeParse(text, {}) : {} };
     } catch (e) {
       return { ok: true, data: {} };
     }
   }
 
+  // queueSync sends state to server. scheduleSync debounces calls.
   async function queueSync() {
     if (!state.settings || !state.settings.syncUrl) return;
     try {
       const payload = {
         transactions: state.transactions || [],
-        // include client categories/budgets/goals so server persists them; server will compute loans authoritatively
         categories: state.categories || [],
         budgets: state.budgets || [],
-        goals: state.goals || []
+        goals: state.goals || [],
+        loans: state.loans || []
       };
       const res = await api('replaceAll', payload);
       if (res && res.data) {
@@ -664,12 +681,28 @@
         saveState();
         renderAll();
       }
-      toast('Pushed changes to sheet');
+      // success toast is handled by caller or testSync; avoid verbose toasts here
+      return res;
     } catch (e) {
       console.warn('sync failed', e);
-      toast(typeof e === 'string' ? e : (e && e.message) ? `Push failed: ${e.message}` : 'Push failed');
+      // bubble error up so callers can show toasts if needed
       throw e;
     }
+  }
+
+  // Debounced sync scheduler to avoid many rapid requests
+  let _syncTimer = null;
+  function scheduleSync(delay = 900) {
+    if (_syncTimer) clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(async () => {
+      _syncTimer = null;
+      try {
+        await queueSync();
+      } catch (e) {
+        // show a lightweight message but don't block app
+        console.warn('Scheduled sync failed:', e);
+      }
+    }, delay);
   }
 
   // --- form submit and tab logic (keeps existing behavior) ---
@@ -704,7 +737,8 @@
     }
     saveState();
     updateLoanRepaymentField(); renderAll(); toast('Saved');
-    try { if (state.settings && state.settings.syncUrl) queueSync().catch(()=>{}); } catch(_) {}
+    // schedule sync (debounced)
+    try { scheduleSync(); } catch (_) {}
     showPage('home'); const form = $('form'); if (form) form.reset(); if ($('date')) $('date').value = today;
   }
 
@@ -760,7 +794,7 @@
       if (id) {
         state.transactions = (state.transactions || []).filter(t => String(t.id) !== String(id));
         saveState(); renderAll();
-        try { if (state.settings && state.settings.syncUrl) queueSync().catch(()=>{}); } catch(_) {}
+        scheduleSync();
       }
       return;
     }
@@ -845,7 +879,7 @@
       } catch (e) { console.warn('pull failed', e); toast('Pull failed: ' + (e && e.message ? e.message : String(e))); }
     });
 
-    $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); renderAll(); toast('Cleared'); });
+    $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); scheduleSync(); renderAll(); toast('Cleared'); });
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
 
     window.addEventListener('resize', () => {
@@ -876,7 +910,8 @@
     save: () => saveState(),
     renderAll,
     applyTheme,
-    updateLoanRepaymentField
+    updateLoanRepaymentField,
+    scheduleSync
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once:true }); else init();
