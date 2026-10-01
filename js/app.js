@@ -340,6 +340,195 @@
     `;
   }
 
+  // --- NEW: Budget summary & Goals rendering (used in Dashboard) ---
+  function renderBudgetReportSummary() {
+    const host = $('budgetReport');
+    if (!host) return;
+    const bs = state.budgets || [];
+    if (!bs.length) { host.innerHTML = `<div class="muted">No budgets set</div>`; return; }
+
+    const monthKey = currentMonth();
+    // For each budget, calculate spent this month (expense transactions matching category)
+    const rows = bs.map(b => {
+      const spent = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey && tx.type === 'expense' && tx.category === b.category)
+        .reduce((s,t) => s + (Number(t.amount) || 0), 0);
+      const remaining = Math.max(0, (Number(b.amount) || 0) - spent);
+      return { category: b.category, budget: Number(b.amount) || 0, spent, remaining };
+    });
+
+    host.innerHTML = rows.map(r => {
+      return `<div class="row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)">
+        <div><strong>${esc(r.category)}</strong><small class="muted">Budget</small></div>
+        <div style="text-align:right">
+          <div><small class="muted">Spent</small><div><b>${money(r.spent)}</b></div></div>
+          <div style="margin-top:4px"><small class="muted">Remaining</small><div><b>${money(r.remaining)}</b></div></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderGoalsList() {
+    const host = $('goalsList');
+    if (!host) return;
+    const gs = state.goals || [];
+    if (!gs.length) { host.innerHTML = `<div class="muted">No goals yet</div>`; return; }
+    host.innerHTML = gs.map(g => {
+      const progress = Number(g.progress) || 0;
+      const target = Number(g.target) || 0;
+      const pct = target > 0 ? Math.round((progress / target) * 100) : 0;
+      return `<div class="row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)">
+        <div><strong>${esc(g.title || g.name || 'Goal')}</strong><small class="muted">${esc(g.note || '')}</small></div>
+        <div style="text-align:right"><small class="muted">${pct}%</small><div><b>${money(progress)}</b></div></div>
+      </div>`;
+    }).join('');
+  }
+
+  // --- Trend chart rendering (vanilla canvas) ---
+  function getLastNMonthKeys(n = 12, endISO = today) {
+    const [eyear, emonth] = (endISO || today).slice(0,7).split('-').map(Number);
+    const months = [];
+    let y = eyear, m = emonth - 1; // JS month 0-based
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(y, m - i, 1));
+      const ky = d.getUTCFullYear();
+      const km = String(d.getUTCMonth() + 1).padStart(2, '0');
+      months.push(`${ky}-${km}`);
+    }
+    return months;
+  }
+
+  function computeMonthlyNetFlow(monthKeys) {
+    // net flow = income - expense - loan - credit (consistent with header computations)
+    const map = {};
+    (state.transactions || []).forEach(tx => {
+      const key = String(tx.date || '').slice(0,7);
+      if (!key) return;
+      if (!map[key]) map[key] = 0;
+      const amt = Number(tx.amount) || 0;
+      if (tx.type === 'income') map[key] += amt;
+      else if (tx.type === 'expense') map[key] -= amt;
+      else if (tx.type === 'loan') map[key] -= amt;
+      else if (tx.type === 'credit') map[key] -= amt;
+    });
+    return monthKeys.map(k => Number(map[k] || 0));
+  }
+
+  function renderTrendChart() {
+    const canvas = $('chart');
+    if (!canvas) return;
+    // responsive sizing
+    const parentWidth = canvas.parentElement ? canvas.parentElement.clientWidth : canvas.clientWidth || 600;
+    const height = 220;
+    canvas.width = Math.max(300, parentWidth * devicePixelRatio);
+    canvas.height = Math.max(120, height * devicePixelRatio);
+    canvas.style.width = parentWidth + 'px';
+    canvas.style.height = height + 'px';
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+
+    // Data
+    const months = getLastNMonthKeys(12);
+    const values = computeMonthlyNetFlow(months).map(v => Math.round(v));
+    // axes padding
+    const padLeft = 40, padRight = 12, padTop = 12, padBottom = 30;
+    const w = (canvas.width / devicePixelRatio) - padLeft - padRight;
+    const h = (canvas.height / devicePixelRatio) - padTop - padBottom;
+
+    // find bounds
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (min === Infinity || max === -Infinity) { min = 0; max = 0; }
+    // expand a bit for aesthetics
+    const range = Math.max(1, max - min);
+    max = Math.ceil(max + range * 0.1);
+    min = Math.floor(min - range * 0.1);
+    // grid lines (4)
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+    ctx.lineWidth = 1;
+    ctx.font = '12px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial';
+    ctx.fillStyle = 'var(--muted, #999)';
+
+    for (let i = 0; i <= 4; i++) {
+      const y = padTop + (h * i / 4);
+      ctx.beginPath();
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(padLeft + w, y);
+      ctx.stroke();
+      // label
+      const val = Math.round(max - (i * (max - min) / 4));
+      ctx.fillText(`${val.toLocaleString()}`, 6, y + 4);
+    }
+
+    // X labels
+    ctx.textAlign = 'center';
+    months.forEach((m, i) => {
+      const x = padLeft + (w * (i / (months.length - 1 || 1)));
+      const lab = m.slice(5); // MM
+      ctx.fillText(lab, x, padTop + h + 18);
+    });
+
+    // line path
+    ctx.beginPath();
+    const points = values.map((v, i) => {
+      const x = padLeft + (w * (i / (values.length - 1 || 1)));
+      const y = padTop + ( (max - v) / (max - min || 1) * h );
+      return { x, y };
+    });
+
+    // draw fill (subtle)
+    if (points.length) {
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let p of points) ctx.lineTo(p.x, p.y);
+      ctx.lineTo(padLeft + w, padTop + h);
+      ctx.lineTo(padLeft, padTop + h);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(62,149,205,0.08)';
+      ctx.fill();
+    }
+
+    // draw line
+    ctx.beginPath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(62,149,205,1)';
+    if (points.length) {
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.stroke();
+    }
+
+    // draw points
+    points.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.fillStyle = 'white';
+      ctx.strokeStyle = 'rgba(62,149,205,1)';
+      ctx.lineWidth = 1.5;
+      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    // draw latest value box on top-right
+    if (values.length) {
+      const latest = values[values.length - 1];
+      const txt = `${Math.round(latest).toLocaleString()} MMK`;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      const tw = ctx.measureText(txt).width + 14;
+      const bx = padLeft + w - tw;
+      const by = padTop + 6;
+      ctx.fillRect(bx, by, tw, 22);
+      ctx.fillStyle = 'white';
+      ctx.fillText(txt, bx + tw / 2, by + 15);
+    }
+
+    ctx.restore();
+  }
+
+  // --- Transactions rendering ---
   function renderHeaderStats() {
     const xs = (state.transactions || []).filter(t => String(t.date || '').slice(0,7) === currentMonth());
     const t = totals(xs);
@@ -417,34 +606,34 @@
     return r.json();
   }
 
-async function queueSync() {
-  if (!state.settings || !state.settings.syncUrl) return;
-  try {
-    const payload = {
-      transactions: state.transactions || [],
-      // include client categories/budgets/goals so server persists them; server will compute loans authoritatively
-      categories: state.categories || [],
-      budgets: state.budgets || [],
-      goals: state.goals || []
-    };
-    const res = await api('replaceAll', payload);
-    // server will respond with { ok:true, message:'Replaced data', data: { transactions, loans, categories, budgets, goals, revision } }
-    if (res && res.data) {
-      // update client state using authoritative server data
-      state.transactions = res.data.transactions || state.transactions || [];
-      state.loans = res.data.loans || state.loans || [];
-      state.categories = res.data.categories || state.categories || [];
-      state.budgets = res.data.budgets || state.budgets || [];
-      state.goals = res.data.goals || state.goals || [];
-      saveState();
-      renderAll();
+  async function queueSync() {
+    if (!state.settings || !state.settings.syncUrl) return;
+    try {
+      const payload = {
+        transactions: state.transactions || [],
+        // include client categories/budgets/goals so server persists them; server will compute loans authoritatively
+        categories: state.categories || [],
+        budgets: state.budgets || [],
+        goals: state.goals || []
+      };
+      const res = await api('replaceAll', payload);
+      // server will respond with { ok:true, message:'Replaced data', data: { transactions, loans, categories, budgets, goals, revision } }
+      if (res && res.data) {
+        // update client state using authoritative server data
+        state.transactions = res.data.transactions || state.transactions || [];
+        state.loans = res.data.loans || state.loans || [];
+        state.categories = res.data.categories || state.categories || [];
+        state.budgets = res.data.budgets || state.budgets || [];
+        state.goals = res.data.goals || state.goals || [];
+        saveState();
+        renderAll();
+      }
+      toast('Pushed changes to sheet');
+    } catch (e) {
+      console.warn('sync failed', e);
+      toast('Push failed');
     }
-    toast('Pushed changes to sheet');
-  } catch (e) {
-    console.warn('sync failed', e);
-    toast('Push failed');
   }
-}
 
   // --- form submit and tab logic (keeps existing behavior) ---
   async function saveTransactionForm(e) {
@@ -550,6 +739,7 @@ async function queueSync() {
   function renderAll() {
     greeting(); populateCategories(); renderHeaderStats(); renderTransactions(); renderLoanSummary(); updateLoanRepaymentField();
     renderCategoriesList(); renderBudgetsList(); fillCategorySelects();
+    renderBudgetReportSummary(); renderGoalsList(); renderTrendChart();
     if ($('month')) $('month').value = currentMonth();
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
@@ -602,7 +792,11 @@ async function queueSync() {
     $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); renderAll(); toast('Cleared'); });
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
 
-    window.addEventListener('resize', () => updateNavDisplay(document.querySelector('.page.active')?.id || 'home'));
+    window.addEventListener('resize', () => {
+      updateNavDisplay(document.querySelector('.page.active')?.id || 'home');
+      // re-render chart responsively
+      renderTrendChart();
+    });
   }
 
   function init() {
@@ -618,11 +812,6 @@ async function queueSync() {
     wireTabs();
     renderAll();
     showPage('home');
-  }
-
-  // small helpers
-  function saveState() {
-    writeState(state);
   }
 
   // expose for debugging
