@@ -400,6 +400,50 @@
     }).join('');
   }
 
+  // --- Dashboard stats (new) ---
+  function renderDashboardStats() {
+    const monthKey = currentMonth();
+    const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
+    // cashflow = net (income - expense - loan - credit) for current month
+    const t = totals(rows);
+    const cashflow = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
+    const cfEl = $('cashflow');
+    if (cfEl) cfEl.textContent = money(cashflow);
+
+    // top spending (by category) for current month
+    const expenseRows = rows.filter(tx => tx.type === 'expense');
+    const spendByCat = {};
+    expenseRows.forEach(tx => {
+      const cat = tx.category || tx.note || 'Other';
+      spendByCat[cat] = (spendByCat[cat] || 0) + (Number(tx.amount) || 0);
+    });
+    let topCat = '—', topAmt = 0;
+    for (const k in spendByCat) {
+      if (spendByCat[k] > topAmt) { topAmt = spendByCat[k]; topCat = k; }
+    }
+    const topSpendEl = $('topSpend');
+    if (topSpendEl) topSpendEl.textContent = topCat || '—';
+    const topAmtEl = $('topAmt');
+    if (topAmtEl) topAmtEl.textContent = money(topAmt);
+
+    // largest activity: single txn with largest absolute amount in month
+    let largestLabel = '—', largestAmt = 0;
+    if (rows.length) {
+      const sorted = rows.slice().sort((a,b) => Math.abs(Number(b.amount)||0) - Math.abs(Number(a.amount)||0));
+      const l = sorted[0];
+      largestLabel = l.category || l.note || l.type || '—';
+      largestAmt = Number(l.amount) || 0;
+    }
+    const largestEl = $('largest');
+    if (largestEl) largestEl.textContent = largestLabel;
+    const largestAmtEl = $('largestAmt');
+    if (largestAmtEl) largestAmtEl.textContent = money(largestAmt);
+
+    // entries count
+    const rhythmEl = $('rhythm');
+    if (rhythmEl) rhythmEl.textContent = String(rows.length || 0);
+  }
+
   // --- Trend chart rendering (vanilla canvas) ---
   function getLastNMonthKeys(n = 12, endISO = today) {
     const [eyear, emonth] = (endISO || today).slice(0,7).split('-').map(Number);
@@ -589,11 +633,12 @@
     if (recentTbody) {
       recentTbody.innerHTML = xs.slice(0,8).map(tx => {
         const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
+        // removed delete button per request; keep last cell empty to preserve layout
         return `<tr>
           <td>${esc(tx.date || '')}</td>
           <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
           <td>${right}</td>
-          <td><button data-remove="${tx.id}" aria-label="Delete transaction">Delete</button></td>
+          <td></td>
         </tr>`;
       }).join('');
     }
@@ -601,11 +646,12 @@
     if (txTbody) {
       txTbody.innerHTML = xs.map(tx => {
         const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
+        // removed delete button per request; keep last cell empty to preserve layout
         return `<tr>
           <td>${esc(tx.date || '')}</td>
           <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
           <td>${right}</td>
-          <td><button data-remove="${tx.id}" aria-label="Delete transaction">Delete</button></td>
+          <td></td>
         </tr>`;
       }).join('');
     }
@@ -811,6 +857,7 @@
     greeting(); populateCategories(); renderHeaderStats(); renderTransactions(); renderLoanSummary(); updateLoanRepaymentField();
     renderCategoriesList(); renderBudgetsList(); fillCategorySelects();
     renderBudgetReportSummary(); renderGoalsList(); renderTrendChart();
+    renderDashboardStats(); // <-- update dashboard metrics correctly
     if ($('month')) $('month').value = currentMonth();
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
