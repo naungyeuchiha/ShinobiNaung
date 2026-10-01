@@ -594,31 +594,83 @@
     }
   }
 
-// Replace existing api() with this version (safe, form-encoded POST to avoid CORS preflight)
-async function api(action, payload = {}) {
-  if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
+  // Replace existing api() with a hardened, form-encoded POST to avoid CORS preflight and produce clearer errors.
+  async function api(action, payload = {}) {
+    if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
 
-  // Use URLSearchParams so the request is application/x-www-form-urlencoded (CORS simple)
-  const params = new URLSearchParams();
-  params.append('action', action);
-  // payload may be large; stringify it
-  params.append('payload', JSON.stringify(payload));
+    // Prepare form-encoded body
+    const params = new URLSearchParams();
+    params.append('action', action);
+    params.append('payload', JSON.stringify(payload));
 
-  const r = await fetch(state.settings.syncUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-    body: params.toString()
-  });
+    let r;
+    try {
+      r = await fetch(state.settings.syncUrl, {
+        method: 'POST',
+        mode: 'cors',
+        cache: 'no-store',
+        redirect: 'follow',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'Accept': 'application/json, text/plain, */*'
+        },
+        body: params.toString()
+      });
+    } catch (fetchErr) {
+      console.error('Fetch error in api():', fetchErr);
+      throw new Error('Network error when contacting sync endpoint: ' + String(fetchErr));
+    }
 
-  if (!r.ok) {
-    // try to read server error message
-    let txt = await r.text().catch(()=>null);
-    throw new Error('Sync failed' + (txt ? (': ' + txt) : ''));
+    // Try to parse JSON, fallback to text for better diagnostics
+    const text = await r.text().catch(() => null);
+    let parsed = null;
+    if (text) {
+      try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
+    }
+
+    if (!r.ok) {
+      const bodyMsg = parsed ? JSON.stringify(parsed) : text || ('status ' + r.status);
+      throw new Error('Sync failed: ' + bodyMsg);
+    }
+
+    // If parsed JSON available return it, otherwise attempt to return text wrapped
+    if (parsed) return parsed;
+    try {
+      // if remote returns plain JSON-like text, try JSON.parse again
+      return { ok: true, data: text ? safeParse(text, {}) : {} };
+    } catch (e) {
+      return { ok: true, data: {} };
+    }
   }
 
-  // Server returns JSON body like { ok: true, data: { ... } }
-  return r.json();
-}
+  async function queueSync() {
+    if (!state.settings || !state.settings.syncUrl) return;
+    try {
+      const payload = {
+        transactions: state.transactions || [],
+        // include client categories/budgets/goals so server persists them; server will compute loans authoritatively
+        categories: state.categories || [],
+        budgets: state.budgets || [],
+        goals: state.goals || []
+      };
+      const res = await api('replaceAll', payload);
+      if (res && res.data) {
+        // update client state using authoritative server data (if provided)
+        state.transactions = res.data.transactions || state.transactions || [];
+        state.loans = res.data.loans || state.loans || [];
+        state.categories = res.data.categories || state.categories || [];
+        state.budgets = res.data.budgets || state.budgets || [];
+        state.goals = res.data.goals || state.goals || [];
+        saveState();
+        renderAll();
+      }
+      toast('Pushed changes to sheet');
+    } catch (e) {
+      console.warn('sync failed', e);
+      toast(typeof e === 'string' ? e : (e && e.message) ? `Push failed: ${e.message}` : 'Push failed');
+      throw e;
+    }
+  }
 
   // --- form submit and tab logic (keeps existing behavior) ---
   async function saveTransactionForm(e) {
@@ -756,13 +808,30 @@ async function api(action, payload = {}) {
     $('testSync')?.addEventListener('click', async () => {
       const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
       state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
-      try { await queueSync(); toast('Test sync done'); } catch (e) { toast('Test sync failed'); }
+      try {
+        // quick ping to check endpoint responsiveness
+        const ping = await api('ping', {});
+        if (ping && (ping.ok || ping.message)) {
+          // if ping succeeded, run a push to confirm write access
+          try {
+            await queueSync();
+            toast('Test sync done');
+          } catch (e) {
+            toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e)));
+          }
+        } else {
+          toast('Ping did not return expected response');
+        }
+      } catch (e) {
+        console.warn('ping failed', e);
+        toast('Ping failed: ' + (e && e.message ? e.message : String(e)));
+      }
     });
     $('pullFromSheets')?.addEventListener('click', async () => {
       const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
       state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
       try {
-        const res = await api('getAll');
+        const res = await api('getAll', {});
         if (res && res.data) {
           state.transactions = res.data.transactions || state.transactions || [];
           state.loans = res.data.loans || state.loans || [];
@@ -770,8 +839,10 @@ async function api(action, payload = {}) {
           state.budgets = res.data.budgets || state.budgets || [];
           state.goals = res.data.goals || state.goals || [];
           saveState(); renderAll(); toast('Pulled from sheet');
-        } else toast('No data from sheet');
-      } catch (e) { console.warn('pull failed', e); toast('Pull failed'); }
+        } else {
+          toast('No data from sheet');
+        }
+      } catch (e) { console.warn('pull failed', e); toast('Pull failed: ' + (e && e.message ? e.message : String(e))); }
     });
 
     $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); renderAll(); toast('Cleared'); });
