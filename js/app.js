@@ -7,7 +7,7 @@
   const q = sel => document.querySelector(sel);
   const today = new Date().toISOString().slice(0,10);
 
-  const PAGE_SIZE = 25; // pagination page size for transaction history
+  const PAGE_SIZE = 25;
 
   const money = n => `${Math.round(Number(n) || 0).toLocaleString()} MMK`;
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,7 +16,6 @@
     try { return JSON.parse(s); } catch (e) { return fallback; }
   }
 
-  // Remove default categories - start empty so user can create unlimited categories.
   function defaultCategories() {
     return [];
   }
@@ -25,22 +24,20 @@
     return {
       transactions: [],
       categories: defaultCategories(),
-      budgets: [], // {id, category, amount}
+      budgets: [],
       goals: [],
       loans: [],
-      settings: { theme: 'light', syncUrl: '', carryOver: false }, // carryOver default off
+      settings: { theme: 'light', syncUrl: '', carryOver: false },
       reportMonth: today.slice(0,7),
       currentType: 'expense',
-      lastCarryMonth: null // track which month carry over has been applied
+      lastCarryMonth: null
     };
   }
 
   function readState() {
     try {
       return Object.assign({}, fallback(), safeParse(localStorage.getItem(KEY) || 'null', {}));
-    } catch (e) {
-      return fallback();
-    }
+    } catch (e) { return fallback(); }
   }
 
   function writeState(s) {
@@ -61,7 +58,6 @@
     writeState(state);
   }
 
-  // pagination state for transactions page
   let txPageIndex = 0;
 
   function repairTransactionIds() {
@@ -78,7 +74,6 @@
 
   function currentMonth() { return state.reportMonth || today.slice(0,7); }
 
-  // --- Categories management (UI + logic) ---
   function renderCategoriesList() {
     const holder = $('categoriesList');
     if (!holder) return;
@@ -97,14 +92,13 @@
         </div>
       </div>`;
     }).join('');
-    // wire inline events
-    holder.querySelectorAll('button.edit').forEach(btn => btn.addEventListener('click', e => {
+
+    holder.querySelectorAll('button.edit').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const c = state.categories[idx];
       const newName = prompt('Edit category name', c.name);
       if (!newName) return;
       const newType = prompt('Type (expense|income|loan|credit)', c.type) || c.type;
-      // avoid duplicates (case-insensitive)
       const dup = state.categories.some((x,i) => i!==idx && x.name.toLowerCase() === newName.trim().toLowerCase() && x.type === newType);
       if (dup) { toast('Category already exists'); return; }
       state.categories[idx].name = newName.trim();
@@ -115,7 +109,8 @@
       scheduleSync();
       toast('Category updated');
     }));
-    holder.querySelectorAll('button.delete').forEach(btn => btn.addEventListener('click', e => {
+
+    holder.querySelectorAll('button.delete').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const c = state.categories[idx];
       if (!confirm(`Delete category "${c.name}" (${c.type})? This will not delete existing transactions.`)) return;
@@ -126,6 +121,7 @@
       scheduleSync();
       toast('Category deleted');
     }));
+
     fillCategorySelects();
   }
 
@@ -133,7 +129,6 @@
     const name = ($('newCategoryName')?.value || '').trim();
     const type = ($('newCategoryType')?.value || 'expense');
     if (!name) { toast('Category name required'); return; }
-    // check duplicate
     if (state.categories.some(c => c.name.toLowerCase() === name.toLowerCase() && c.type === type)) { toast('Category exists'); return; }
     state.categories.push({ id: uid('cat'), name, type, createdAt: new Date().toISOString() });
     saveState();
@@ -154,7 +149,6 @@
     toast('Categories cleared');
   }
 
-  // fill any category select inputs (category select in add form and budget category select)
   function fillCategorySelects() {
     const categorySelect = $('category');
     if (categorySelect) {
@@ -167,7 +161,6 @@
     }
   }
 
-  // --- Budgets management ---
   function renderBudgetsList() {
     const holder = $('budgetsList');
     if (!holder) return;
@@ -182,6 +175,7 @@
         </div>
       </div>`;
     }).join('');
+
     holder.querySelectorAll('button.edit-budget').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const b = state.budgets[idx];
@@ -195,6 +189,7 @@
       renderBudgetsList();
       toast('Budget updated');
     }));
+
     holder.querySelectorAll('button.delete-budget').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const b = state.budgets[idx];
@@ -235,7 +230,6 @@
     toast('All budgets cleared');
   }
 
-  // --- existing app logic helpers ---
   function totals(xs) {
     return xs.reduce((r,t) => {
       const n = Number(t.amount) || 0;
@@ -347,7 +341,6 @@
     `;
   }
 
-  // --- Budget & Goals ---
   function renderBudgetReportSummary() {
     const host = $('budgetReport');
     if (!host) return;
@@ -389,7 +382,6 @@
     }).join('');
   }
 
-  // --- Dashboard stats ---
   function renderDashboardStats() {
     const monthKey = currentMonth();
     const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
@@ -423,7 +415,6 @@
     const rhythmEl = $('rhythm'); if (rhythmEl) rhythmEl.textContent = String(rows.length || 0);
   }
 
-  // --- Trend chart (unchanged) ---
   function getLastNMonthKeys(n = 12, endISO = today) {
     const [eyear, emonth] = (endISO || today).slice(0,7).split('-').map(Number);
     const months = [];
@@ -527,7 +518,7 @@
       ctx.stroke();
     }
 
-    points.forEach((p, i) => {
+    points.forEach((p) => {
       ctx.beginPath();
       ctx.fillStyle = 'white';
       ctx.strokeStyle = 'rgba(62,149,205,1)';
@@ -552,7 +543,6 @@
     ctx.restore();
   }
 
-  // --- Transactions rendering with pagination/lazy loading ---
   function renderHeaderStats() {
     const xs = (state.transactions || []).filter(t => String(t.date || '').slice(0,7) === currentMonth());
     const t = totals(xs);
@@ -593,8 +583,9 @@
     txTbody.insertAdjacentHTML('beforeend', rowsHtml);
 
     const loadBtn = $('loadMoreTx');
-    if (!loadBtn) return;
-    if (end >= xs.length) loadBtn.style.display = 'none'; else loadBtn.style.display = 'inline-block';
+    if (loadBtn) {
+      if (end >= xs.length) loadBtn.style.display = 'none'; else loadBtn.style.display = 'inline-block';
+    }
 
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
@@ -604,16 +595,110 @@
     renderTransactionsPage(0);
   }
 
-  // API helpers
-  async function api(action, payload = {}) {
-    if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
-    const params = new URLSearchParams();
-    params.append('action', action);
-    params.append('payload', JSON.stringify(payload));
+  // CORS-safe sync
+  function jsonpGet(url, params = {}) {
+    return new Promise((resolve, reject) => {
+      const cbName = `mf_jsonp_cb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
+      window[cbName] = function(res) {
+        try { resolve(res); } finally { try { delete window[cbName]; } catch (e) {} }
+      };
+      const qs = Object.keys(params || {}).map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');
+      const sep = url.indexOf('?') === -1 ? '?' : '&';
+      const src = `${url}${sep}${qs}${qs ? '&' : ''}callback=${cbName}`;
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onerror = () => {
+        try { delete window[cbName]; } catch (_) {}
+        reject(new Error('JSONP failed to load script'));
+      };
+      document.head.appendChild(script);
+      setTimeout(() => { if (script && script.parentNode) script.parentNode.removeChild(script); }, 30_000);
+    });
+  }
 
-    let r;
+  function postViaIframe(url, action, payload = {}) {
+    return new Promise((resolve, reject) => {
+      const frameName = `mf_frame_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
+      const iframe = document.createElement('iframe');
+      iframe.name = frameName;
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      function cleanup() {
+        try { window.removeEventListener('message', onMessage); } catch (e) {}
+        try { if (form && form.parentNode) form.parentNode.removeChild(form); } catch (e) {}
+        try { if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (e) {}
+        clearTimeout(to);
+      }
+
+      function onMessage(e) {
+        try {
+          const data = e.data;
+          if (data && (data.ok === true || data.ok === false || data.error)) {
+            cleanup();
+            resolve(data);
+          }
+        } catch (_) {}
+      }
+      window.addEventListener('message', onMessage, false);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = url;
+      form.target = frameName;
+      form.style.display = 'none';
+
+      const inputAction = document.createElement('input');
+      inputAction.type = 'hidden';
+      inputAction.name = 'action';
+      inputAction.value = action;
+
+      const inputPayload = document.createElement('input');
+      inputPayload.type = 'hidden';
+      inputPayload.name = 'payload';
+      inputPayload.value = JSON.stringify(payload);
+
+      form.appendChild(inputAction);
+      form.appendChild(inputPayload);
+      document.body.appendChild(form);
+
+      const to = setTimeout(() => {
+        cleanup();
+        reject(new Error('sync iframe POST timed out'));
+      }, 30_000);
+
+      try {
+        form.submit();
+      } catch (err) {
+        cleanup();
+        reject(err);
+      }
+    });
+  }
+
+  async function api(action, payload = {}) {
+    const url = state.settings && state.settings.syncUrl;
+    if (!url) throw new Error('Add the Apps Script URL first.');
+
+    if (action === 'getAll' || action === 'ping') {
+      try {
+        const res = await fetch(url + `?action=${encodeURIComponent(action)}`, { method: 'GET', cache: 'no-store' });
+        if (res.ok) {
+          const text = await res.text().catch(() => null);
+          try { return JSON.parse(text); } catch (e) {}
+        }
+      } catch (e) {
+        // fallback below
+      }
+      return jsonpGet(url, { action });
+    }
+
     try {
-      r = await fetch(state.settings.syncUrl, {
+      const params = new URLSearchParams();
+      params.append('action', action);
+      params.append('payload', JSON.stringify(payload));
+      const res = await fetch(url, {
         method: 'POST',
         mode: 'cors',
         cache: 'no-store',
@@ -624,27 +709,18 @@
         },
         body: params.toString()
       });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => null);
+        throw new Error(`Sync failed: ${txt || ('status ' + res.status)}`);
+      }
+      const text = await res.text().catch(() => null);
+      try { return JSON.parse(text); } catch (e) { return { ok: true, data: safeParse(text, {}) }; }
     } catch (fetchErr) {
-      console.error('Fetch error in api():', fetchErr);
-      throw new Error('Network error when contacting sync endpoint: ' + String(fetchErr));
-    }
-
-    const text = await r.text().catch(() => null);
-    let parsed = null;
-    if (text) {
-      try { parsed = JSON.parse(text); } catch (e) { parsed = null; }
-    }
-
-    if (!r.ok) {
-      const bodyMsg = parsed ? JSON.stringify(parsed) : text || ('status ' + r.status);
-      throw new Error('Sync failed: ' + bodyMsg);
-    }
-
-    if (parsed) return parsed;
-    try {
-      return { ok: true, data: text ? safeParse(text, {}) : {} };
-    } catch (e) {
-      return { ok: true, data: {} };
+      try {
+        return await postViaIframe(url, action, payload);
+      } catch (iframeErr) {
+        throw new Error('Network error when contacting sync endpoint: ' + String(iframeErr));
+      }
     }
   }
 
@@ -688,7 +764,6 @@
     }, delay);
   }
 
-  // --- form submit and tabs ---
   async function saveTransactionForm(e) {
     e.preventDefault();
     const amountInput = $('amount'), dateInput = $('date'), noteInput = $('note'), categorySelect = $('category');
@@ -700,6 +775,7 @@
     const note = noteInput?.value || '';
     const category = categorySelect?.value || '';
     let tx;
+
     if (type === 'loan') {
       const loanId = uid('loan');
       tx = { id: uid('tx'), type: 'income', amount, category: category || 'Loan', note, date, loanId, loanType: 'loan', createdAt: new Date().toISOString() };
@@ -718,10 +794,14 @@
       tx = { id: uid('tx'), type: type === 'income' ? 'income' : 'expense', amount, category, note, date, createdAt: new Date().toISOString() };
       state.transactions.push(tx);
     }
+
     saveState();
-    updateLoanRepaymentField(); renderAll(); toast('Saved');
+    updateLoanRepaymentField();
+    renderAll();
+    toast('Saved');
     scheduleSync();
-    showPage('home'); const form = $('form'); if (form) form.reset(); if ($('date')) $('date').value = today;
+    showPage('home');
+    const form = $('form'); if (form) form.reset(); if ($('date')) $('date').value = today;
   }
 
   function wireTabs() {
@@ -756,6 +836,7 @@
     document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === id));
     document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === id));
     updateNavDisplay(id);
+
     if (id === 'home') renderAll();
     if (id === 'transactions') {
       txPageIndex = 0;
@@ -763,7 +844,6 @@
     }
     if (id === 'settings') {
       const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || '';
-      // ensure carryOver toggle is present and checked state synced
       ensureCarryToggleExists();
       const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver;
     }
@@ -798,10 +878,21 @@
   }
 
   function renderAll() {
-    greeting(); populateCategories(); renderHeaderStats(); renderLoanSummary(); updateLoanRepaymentField();
-    renderCategoriesList(); renderBudgetsList(); fillCategorySelects();
-    renderBudgetReportSummary(); renderGoalsList(); renderTrendChart();
+    greeting();
+    populateCategories();
+    renderHeaderStats();
+    renderTransactionsPage(txPageIndex);
+    renderLoanSummary();
+    updateLoanRepaymentField();
+    renderCategoriesList();
+    renderBudgetsList();
+    fillCategorySelects();
+    renderBudgetReportSummary();
+    renderGoalsList();
+    renderTrendChart();
     renderDashboardStats();
+
+    if ($('month')) $('month').value = currentMonth();
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
@@ -816,7 +907,9 @@
     document.getElementById('form')?.addEventListener('submit', saveTransactionForm);
     document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => showPage(b.dataset.page)));
     document.querySelectorAll('.theme-toggle').forEach(btn => btn.addEventListener('click', () => {
-      state.settings = state.settings || {}; state.settings.theme = state.settings.theme === 'dark' ? 'light' : 'dark'; saveState(); applyTheme();
+      state.settings = state.settings || {};
+      state.settings.theme = state.settings.theme === 'dark' ? 'light' : 'dark';
+      saveState(); applyTheme();
     }));
 
     $('addCategory')?.addEventListener('click', addCategoryFromUI);
@@ -825,23 +918,43 @@
     $('clearBudgets')?.addEventListener('click', clearBudgets);
 
     $('saveSyncUrl')?.addEventListener('click', () => {
-      const url = ($('syncUrlInput')?.value || '').trim(); state.settings = state.settings || {}; state.settings.syncUrl = url; saveState(); toast(url ? 'Sync URL saved' : 'Sync URL cleared');
+      const url = ($('syncUrlInput')?.value || '').trim();
+      state.settings = state.settings || {};
+      state.settings.syncUrl = url;
+      saveState();
+      toast(url ? 'Sync URL saved' : 'Sync URL cleared');
     });
+
     $('testSync')?.addEventListener('click', async () => {
-      const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
-      state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
+      const url = ($('syncUrlInput')?.value || '').trim();
+      if (!url) { toast('Enter Apps Script URL first'); return; }
+      state.settings = state.settings || {};
+      state.settings.syncUrl = url;
+      saveState();
       try {
         const ping = await api('ping', {});
         if (ping && (ping.ok || ping.message)) {
-          try { await queueSync(); toast('Test sync done'); } catch (e) { toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e))); }
+          try {
+            await queueSync();
+            toast('Test sync done');
+          } catch (e) {
+            toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e)));
+          }
         } else {
           toast('Ping did not return expected response');
         }
-      } catch (e) { console.warn('ping failed', e); toast('Ping failed: ' + (e && e.message ? e.message : String(e))); }
+      } catch (e) {
+        console.warn('ping failed', e);
+        toast('Ping failed: ' + (e && e.message ? e.message : String(e)));
+      }
     });
+
     $('pullFromSheets')?.addEventListener('click', async () => {
-      const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
-      state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
+      const url = ($('syncUrlInput')?.value || '').trim();
+      if (!url) { toast('Enter Apps Script URL first'); return; }
+      state.settings = state.settings || {};
+      state.settings.syncUrl = url;
+      saveState();
       try {
         const res = await api('getAll', {});
         if (res && res.data) {
@@ -850,17 +963,34 @@
           state.categories = res.data.categories || state.categories || [];
           state.budgets = res.data.budgets || state.budgets || [];
           state.goals = res.data.goals || state.goals || [];
-          saveState(); renderAll(); toast('Pulled from sheet');
+          saveState();
+          renderAll();
+          toast('Pulled from sheet');
         } else {
           toast('No data from sheet');
         }
-      } catch (e) { console.warn('pull failed', e); toast('Pull failed: ' + (e && e.message ? e.message : String(e))); }
+      } catch (e) {
+        console.warn('pull failed', e);
+        toast('Pull failed: ' + (e && e.message ? e.message : String(e)));
+      }
     });
 
-    $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); scheduleSync(); renderAll(); toast('Cleared'); });
+    $('clear')?.addEventListener('click', () => {
+      if (!confirm('Clear all transactions?')) return;
+      state.transactions = [];
+      state.loans = [];
+      saveState();
+      scheduleSync();
+      renderAll();
+      toast('Cleared');
+    });
+
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
 
-    $('loadMoreTx')?.addEventListener('click', () => { txPageIndex = txPageIndex + 1; renderTransactionsPage(txPageIndex); });
+    $('loadMoreTx')?.addEventListener('click', () => {
+      txPageIndex = txPageIndex + 1;
+      renderTransactionsPage(txPageIndex);
+    });
 
     window.addEventListener('resize', () => {
       updateNavDisplay(document.querySelector('.page.active')?.id || 'home');
@@ -868,12 +998,55 @@
     });
   }
 
-  // --- Carry over logic ---
-  function firstDayOfMonthISO(monthStr) { return `${monthStr}-01`; }
+  function ensureCarryToggleExists() {
+    if ($('carryOverToggle')) return;
+
+    const themePanel = Array.from(document.querySelectorAll('#settings .panel')).find(panel => {
+      const h3 = panel.querySelector('h3');
+      return h3 && h3.textContent && h3.textContent.trim().toLowerCase() === 'theme';
+    });
+
+    const parent = themePanel ? themePanel.parentElement : $('settings');
+    if (!parent) return;
+
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.style.marginTop = '12px';
+    panel.innerHTML = `
+      <h3>Carry Over</h3>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <label for="carryOverToggle" style="margin:0;font-weight:600">Carry remaining to next month</label>
+        <input id="carryOverToggle" type="checkbox" />
+      </div>
+      <small class="muted">When enabled, positive remaining money for the month is added automatically as an income transaction at the start of next month.</small>
+    `;
+
+    if (themePanel && themePanel.parentElement) {
+      themePanel.parentElement.insertBefore(panel, themePanel.nextSibling);
+    } else {
+      parent.appendChild(panel);
+    }
+
+    const carry = $('carryOverToggle');
+    if (carry) {
+      carry.checked = !!state.settings?.carryOver;
+      carry.addEventListener('change', (e) => {
+        state.settings = state.settings || {};
+        state.settings.carryOver = !!e.target.checked;
+        saveState();
+        toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
+      });
+    }
+  }
+
+  function firstDayOfMonthISO(monthStr) {
+    return `${monthStr}-01`;
+  }
 
   function prevMonthKey(monthKey) {
     const [y, m] = monthKey.split('-').map(Number);
-    let py = y, pm = m - 1;
+    let py = y;
+    let pm = m - 1;
     if (pm < 1) { pm = 12; py = y - 1; }
     return `${py}-${String(pm).padStart(2,'0')}`;
   }
@@ -912,52 +1085,11 @@
     }
   }
 
-  // --- Init & helpers ---
   function initPaginationControls() {
     const loadBtn = $('loadMoreTx');
     if (!loadBtn) return;
     const total = (state.transactions || []).length;
     if (total > PAGE_SIZE) loadBtn.style.display = 'inline-block'; else loadBtn.style.display = 'none';
-  }
-
-  // If carry toggle is missing in HTML, inject it into Settings (non-invasive).
-  function ensureCarryToggleExists() {
-    if ($('carryOverToggle')) return;
-    const settingsPanels = document.querySelectorAll('#settings .panel');
-    // Try to append after the Theme panel (safe heuristic)
-    let themePanel = null;
-    settingsPanels.forEach(p => {
-      if (p.querySelector('h3') && p.querySelector('h3').textContent && p.querySelector('h3').textContent.trim().toLowerCase() === 'theme') themePanel = p;
-    });
-    const container = themePanel ? themePanel.parentElement : document.querySelector('#settings');
-    if (!container) return;
-    // Create panel element
-    const panel = document.createElement('div'); panel.className = 'panel'; panel.style.marginTop = '12px';
-    panel.innerHTML = `
-      <h3>Carry Over</h3>
-      <div style="display:flex;gap:10px;align-items:center;">
-        <label for="carryOverToggle" style="margin:0;font-weight:600">Carry remaining to next month</label>
-        <input id="carryOverToggle" type="checkbox" />
-      </div>
-      <small class="muted">When enabled, positive remaining money for the month is added automatically as an income transaction at the start of next month.</small>
-    `;
-    // insert after themePanel if found, otherwise append to settings
-    if (themePanel && themePanel.parentElement) themePanel.parentElement.insertBefore(panel, themePanel.nextSibling);
-    else {
-      const settingsRoot = document.querySelector('#settings');
-      settingsRoot.appendChild(panel);
-    }
-    // wire toggle
-    const carry = $('carryOverToggle');
-    if (carry) {
-      carry.checked = !!state.settings?.carryOver;
-      carry.addEventListener('change', (e) => {
-        state.settings = state.settings || {};
-        state.settings.carryOver = !!e.target.checked;
-        saveState();
-        toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
-      });
-    }
   }
 
   function init() {
@@ -968,6 +1100,7 @@
     state.loans = Array.isArray(state.loans) ? state.loans : [];
     state.goals = Array.isArray(state.goals) ? state.goals : [];
     if (!state.settings) state.settings = { theme: 'light', syncUrl: '', carryOver: false };
+
     repairTransactionIds();
     applyTheme();
     wireEvents();
@@ -981,20 +1114,23 @@
     showPage('home');
   }
 
-  // Expose helpers so external callers (sync handlers, other scripts) won't get "not defined"
+  // expose for debugging and to avoid "renderHeaderStats is not defined" errors
   window.moneyflow = window.moneyflow || {};
   Object.assign(window.moneyflow, {
     state,
     save: () => saveState(),
     renderAll,
+    renderHeaderStats,
+    renderBudgetReportSummary,
+    renderTransactionsPage,
     applyTheme,
     updateLoanRepaymentField,
-    scheduleSync,
-    renderTransactionsPage,
-    renderHeaderStats,
-    renderBudgetReportSummary
+    scheduleSync
   });
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once:true }); else init();
-
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
 })();
