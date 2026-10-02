@@ -1,3 +1,4 @@
+// js/app.js
 (() => {
   'use strict';
 
@@ -9,7 +10,7 @@
   const PAGE_SIZE = 25;
 
   const money = n => `${Math.round(Number(n) || 0).toLocaleString()} MMK`;
-  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
 
   function safeParse(s, fallback = {}) {
     try { return JSON.parse(s); } catch (e) { return fallback; }
@@ -28,12 +29,12 @@
       loans: [],
       settings: { theme: 'light', syncUrl: '', carryOver: false },
       reportMonth: today.slice(0,7),
+      reportFrom: '',
+      reportTo: '',
       currentType: 'expense',
       lastCarryMonth: null,
       budgetAlerts: {},
-      budgetsLastRefreshedMonth: null,
-      reportFrom: null,
-      reportTo: null
+      budgetsLastRefreshedMonth: null
     };
   }
 
@@ -59,54 +60,6 @@
 
   let txPageIndex = 0;
 
-  function normalizeSettings() {
-    state.settings = Object.assign({ theme: 'light', syncUrl: '', carryOver: false }, state.settings || {});
-    state.reportMonth = state.reportMonth || today.slice(0,7);
-    state.reportFrom = state.reportFrom || null;
-    state.reportTo = state.reportTo || null;
-  }
-
-  function monthKeyToDate(monthKey) {
-    return new Date(`${String(monthKey)}-01T00:00:00Z`);
-  }
-
-  function monthsBetween(startKey, endKey) {
-    if (!startKey || !endKey) return [];
-    let [sy, sm] = startKey.split('-').map(Number);
-    let [ey, em] = endKey.split('-').map(Number);
-    if (sy > ey || (sy === ey && sm > em)) {
-      const tmpy = sy, tmpm = sm;
-      sy = ey; sm = em;
-      ey = tmpy; em = tmpm;
-    }
-    const months = [];
-    let y = sy, m = sm;
-    while (y < ey || (y === ey && m <= em)) {
-      months.push(`${y}-${String(m).padStart(2,'0')}`);
-      m++;
-      if (m > 12) { m = 1; y++; }
-    }
-    return months;
-  }
-
-  function getVisibleTransactions() {
-    const from = state.reportFrom || null;
-    const to = state.reportTo || null;
-    if (from && to) {
-      const start = monthKeyToDate(from);
-      const endDate = monthKeyToDate(to);
-      const end = new Date(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, 0, 23, 59, 59, 999);
-      return (state.transactions || []).filter(tx => {
-        const d = tx.date ? new Date(tx.date + 'T00:00:00') : null;
-        if (!d || Number.isNaN(d.getTime())) return false;
-        return d >= start && d <= end;
-      });
-    }
-
-    const monthKey = state.reportMonth || today.slice(0,7);
-    return (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
-  }
-
   function repairTransactionIds() {
     let changed = false;
     (state.transactions || []).forEach(tx => {
@@ -119,6 +72,16 @@
 
   function currentMonth() {
     return state.reportMonth || today.slice(0,7);
+  }
+
+  function txWithinMonthRange(tx, fromMonth, toMonth) {
+    if (!tx) return false;
+    const d = String(tx.date || '');
+    if (!d) return false;
+    const monthKey = d.slice(0,7);
+    if (fromMonth && monthKey < fromMonth) return false;
+    if (toMonth && monthKey > toMonth) return false;
+    return true;
   }
 
   // Category filtering: Expense tab => expense categories only
@@ -144,6 +107,7 @@
     if (budgetCategorySelect) {
       budgetCategorySelect.innerHTML = (state.categories || []).map(c => `<option value="${esc(c.name)}">${esc(c.name)} • ${esc(c.type)}</option>`).join('') || `<option>General</option>`;
     }
+    // keep form category dropdown consistent with active type
     populateCategories();
   }
 
@@ -366,7 +330,7 @@
     applyRepayments();
     const host = $('loanBI'); if (!host) return;
     const monthKey = currentMonth();
-    const rows = getVisibleTransactions();
+    const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
     const payback = rows.filter(tx => tx.type === 'expense' && tx.loanId).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const received = rows.filter(tx => tx.type === 'income' && tx.loanId).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const outstanding = (state.loans || []).reduce((s, l) => s + (Number(l.remaining) || 0), 0);
@@ -385,6 +349,7 @@
     `;
   }
 
+  // Budget progress bars + near/over alerts
   function renderBudgetReportSummary() {
     const host = $('budgetReport');
     if (!host) return;
@@ -397,8 +362,10 @@
       return;
     }
 
+    const monthKey = currentMonth();
+
     const rowsHtml = bs.map(b => {
-      const spent = getVisibleTransactions().filter(tx => tx.type === 'expense' && tx.category === b.category)
+      const spent = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey && tx.type === 'expense' && tx.category === b.category)
         .reduce((s,t) => s + (Number(t.amount) || 0), 0);
 
       const remaining = Math.max(0, (Number(b.amount) || 0) - spent);
@@ -420,7 +387,7 @@
 
     let alertsChanged = false;
     bs.forEach(b => {
-      const spent = getVisibleTransactions().filter(tx => tx.type === 'expense' && tx.category === b.category)
+      const spent = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey && tx.type === 'expense' && tx.category === b.category)
         .reduce((s,t) => s + (Number(t.amount) || 0), 0);
 
       const pct = (Number(b.amount) || 0) > 0 ? Math.round((spent / (Number(b.amount) || 1)) * 100) : 0;
@@ -461,7 +428,8 @@
   }
 
   function renderDashboardStats() {
-    const rows = getVisibleTransactions();
+    const monthKey = currentMonth();
+    const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
     const t = totals(rows);
     const cashflow = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
 
@@ -534,18 +502,7 @@
     ctx.clearRect(0,0,canvas.width, canvas.height);
     ctx.save(); ctx.scale(devicePixelRatio, devicePixelRatio);
 
-    let months = [];
-    if (state.reportFrom && state.reportTo) {
-      months = monthsBetween(state.reportFrom, state.reportTo);
-    } else {
-      months = getLastNMonthKeys(12, `${currentMonth()}-01`);
-    }
-
-    if (!months.length) {
-      ctx.restore();
-      return;
-    }
-
+    const months = getLastNMonthKeys(12);
     const values = computeMonthlyNetFlow(months).map(v => Math.round(v));
     const padLeft = 40, padRight = 12, padTop = 12, padBottom = 30;
     const w = (canvas.width / devicePixelRatio) - padLeft - padRight;
@@ -565,8 +522,8 @@
     }
 
     ctx.textAlign = 'center';
-    months.forEach((m, idx) => {
-      const x = padLeft + (w * (idx / (months.length - 1 || 1)));
+    months.forEach((m) => {
+      const x = padLeft + (w * (months.indexOf(m) / (months.length - 1 || 1)));
       const lab = m.slice(5); ctx.fillText(lab, x, padTop + h + 18);
     });
 
@@ -610,7 +567,7 @@
   }
 
   function renderHeaderStats() {
-    const xs = getVisibleTransactions();
+    const xs = (state.transactions || []).filter(t => String(t.date || '').slice(0,7) === currentMonth());
     const t = totals(xs);
     const remainingMoney = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
     const now = new Date();
@@ -627,7 +584,11 @@
   }
 
   function renderTransactionsPage(pageIndex = 0) {
-    const xs = getVisibleTransactions().slice().reverse();
+    const allTx = (state.transactions || []).slice().reverse();
+    const fromMonth = state.reportFrom || ($('reportFromInput')?.value || '');
+    const toMonth = state.reportTo || ($('reportToInput')?.value || '');
+    const xs = (fromMonth || toMonth) ? allTx.filter(tx => txWithinMonthRange(tx, fromMonth || null, toMonth || null)) : allTx;
+
     const start = pageIndex * PAGE_SIZE;
     const end = Math.min(xs.length, start + PAGE_SIZE);
     const slice = xs.slice(start, end);
@@ -638,7 +599,7 @@
     const rowsHtml = slice.map(tx => {
       const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
       return `<tr>
-        <td>${esc(tx.date || '')}</td>
+        <td><small class="muted">${esc(tx.date || '')}</small></td>
         <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
         <td>${right}</td>
         <td><button data-remove="${tx.id}" aria-label="Delete transaction" class="small delete">Delete</button></td>
@@ -653,7 +614,9 @@
       else loadBtn.style.display = 'inline-block';
     }
 
-    if ($('txCountList')) $('txCountList').textContent = `Transactions (${xs.length})`;
+    if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
+    if ($('reportFromInput')) $('reportFromInput').value = state.reportFrom || '';
+    if ($('reportToInput')) $('reportToInput').value = state.reportTo || '';
   }
 
   function jsonpGet(url, params = {}) {
@@ -808,6 +771,7 @@
     }, delay);
   }
 
+  // FIXED: Save immediately closes pop-up and resets form without blocking UI
   function saveTransactionForm(e) {
     e.preventDefault();
 
@@ -843,11 +807,13 @@
       state.transactions.push(tx);
     }
 
+    // Persist and update UI immediately
     saveState();
     updateLoanRepaymentField();
     renderAll();
     toast('Saved');
 
+    // Reset form immediately to avoid stale state
     const form = $('form');
     if (form) {
       try { form.reset(); } catch (_) {}
@@ -858,13 +824,16 @@
       try { document.activeElement.blur(); } catch (_) {}
     }
 
+    // Ensure active tab stays consistent
     document.querySelectorAll('.tabs [data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === state.currentType));
 
+    // Close popup in next tick to avoid focus/DOM race
     setTimeout(() => {
       showPage('home');
       renderAll();
     }, 20);
 
+    // Schedule sync asynchronously so UI never blocks
     setTimeout(() => scheduleSync(), 120);
   }
 
@@ -902,37 +871,19 @@
     if (topNav) topNav.classList.toggle('hidden', !wide);
   }
 
-  function syncMonthFilterControl() {
-    const fromInput = $('reportFromInput');
-    const toInput = $('reportToInput');
-    if (fromInput) fromInput.value = state.reportFrom || '';
-    if (toInput) toInput.value = state.reportTo || '';
-  }
-
-  function bindCarryOverToggle() {
-    const carry = $('carryOverToggle');
-    if (!carry) return;
-    carry.checked = !!state.settings?.carryOver;
-    carry.onchange = (e) => {
-      state.settings = state.settings || {};
-      state.settings.carryOver = !!e.target.checked;
-      saveState();
-      toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
-    };
-  }
-
   function showPage(id) {
     document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === id));
     document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === id));
     updateNavDisplay(id);
 
-    if (id === 'home' || id === 'dashboard') renderAll();
+    if (id === 'home') renderAll();
     if (id === 'transactions') { txPageIndex = 0; renderTransactionsPage(0); }
     if (id === 'settings') {
       const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || '';
-      syncMonthFilterControl();
-      bindCarryOverToggle();
+      ensureCarryToggleExists();
       const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver;
+      if ($('reportFromInput')) $('reportFromInput').value = state.reportFrom || '';
+      if ($('reportToInput')) $('reportToInput').value = state.reportTo || '';
     }
   }
 
@@ -982,12 +933,10 @@
     renderGoalsList();
     renderTrendChart();
     renderDashboardStats();
-    syncMonthFilterControl();
-    bindCarryOverToggle();
 
     if ($('month')) $('month').value = currentMonth();
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
-    if ($('txCountList')) $('txCountList').textContent = `Transactions (${getVisibleTransactions().length})`;
+    if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
 
   function greeting() {
@@ -1006,29 +955,6 @@
       saveState();
       applyTheme();
     }));
-
-    $('reportFromInput')?.addEventListener('change', (e) => {
-      const val = (e.target.value || '').trim();
-      state.reportFrom = val || null;
-      saveState();
-      renderAll();
-    });
-
-    $('reportToInput')?.addEventListener('change', (e) => {
-      const val = (e.target.value || '').trim();
-      state.reportTo = val || null;
-      saveState();
-      renderAll();
-    });
-
-    $('clearReportRange')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      state.reportFrom = null;
-      state.reportTo = null;
-      saveState();
-      syncMonthFilterControl();
-      renderAll();
-    });
 
     $('addCategory')?.addEventListener('click', addCategoryFromUI);
     $('resetDefaultCategories')?.addEventListener('click', resetDefaultCategories);
@@ -1101,6 +1027,30 @@
       renderTransactionsPage(txPageIndex);
     });
 
+    $('clearReportRange')?.addEventListener('click', () => {
+      state.reportFrom = '';
+      state.reportTo = '';
+      saveState();
+      if ($('reportFromInput')) $('reportFromInput').value = '';
+      if ($('reportToInput')) $('reportToInput').value = '';
+      txPageIndex = 0;
+      renderTransactionsPage(0);
+    });
+
+    $('reportFromInput')?.addEventListener('change', () => {
+      state.reportFrom = $('reportFromInput')?.value || '';
+      saveState();
+      txPageIndex = 0;
+      renderTransactionsPage(0);
+    });
+
+    $('reportToInput')?.addEventListener('change', () => {
+      state.reportTo = $('reportToInput')?.value || '';
+      saveState();
+      txPageIndex = 0;
+      renderTransactionsPage(0);
+    });
+
     window.addEventListener('resize', () => {
       updateNavDisplay(document.querySelector('.page.active')?.id || 'home');
       renderTrendChart();
@@ -1136,7 +1086,16 @@
       parent.appendChild(panel);
     }
 
-    bindCarryOverToggle();
+    const carry = $('carryOverToggle');
+    if (carry) {
+      carry.checked = !!state.settings?.carryOver;
+      carry.addEventListener('change', (e) => {
+        state.settings = state.settings || {};
+        state.settings.carryOver = !!e.target.checked;
+        saveState();
+        toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
+      });
+    }
   }
 
   function firstDayOfMonthISO(monthStr) {
@@ -1198,7 +1157,7 @@
   function initPaginationControls() {
     const loadBtn = $('loadMoreTx');
     if (!loadBtn) return;
-    const total = getVisibleTransactions().length;
+    const total = (state.transactions || []).length;
     if (total > PAGE_SIZE) loadBtn.style.display = 'inline-block';
     else loadBtn.style.display = 'none';
   }
@@ -1210,7 +1169,9 @@
     state.budgets = Array.isArray(state.budgets) ? state.budgets : [];
     state.loans = Array.isArray(state.loans) ? state.loans : [];
     state.goals = Array.isArray(state.goals) ? state.goals : [];
-    normalizeSettings();
+    if (!state.settings) state.settings = { theme: 'light', syncUrl: '', carryOver: false };
+    state.reportFrom = state.reportFrom || '';
+    state.reportTo = state.reportTo || '';
 
     repairTransactionIds();
     applyTheme();
