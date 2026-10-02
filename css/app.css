@@ -127,13 +127,13 @@ label { display:block; margin-bottom:6px; font-weight:600; }
 button.primary { background: var(--accent); color: #fff; border: none; padding: 10px 12px; border-radius: 10px; box-shadow: 0 8px 18px var(--accent-soft); }
 
 /* Settings lists (categories & budgets) */
-.settings-list { margin-top: 8px; display:block; }
+.settings-list { margin-top: 8px; display:block; max-height: 320px; overflow-y: auto; padding-right:6px; }
 .settings-list .row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); margin-bottom:6px; }
 .settings-list .meta { display:flex; gap:12px; align-items:center; }
 .settings-list .small-muted { color:var(--muted); font-size:0.9rem; }
 .settings-list button.small { font-size:0.85rem; padding:6px 8px; border-radius:8px; }
 
-/* small screens */
+/* Small screens */
 @media (max-width: 640px) {
   .two { grid-template-columns: 1fr; }
   .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -154,7 +154,6 @@ button.primary { background: var(--accent); color: #fff; border: none; padding: 
 /* ---------------------------
    Small / action / delete button styles
    Keep styles theme-aware by using CSS variables.
-   These are minimal, non-invasive styles to align small buttons with theme.
    --------------------------- */
 
 /* Generic small button used in settings and row actions */
