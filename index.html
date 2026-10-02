@@ -62,20 +62,17 @@
 
         <div class="cols">
           <div>
-            <!-- Removed the Activities panel from Home (History remains in Transactions page) -->
-
-            <!-- Put Budget report here on Home (moved from Dashboard) -->
+            <!-- Budgets panel moved to Home -->
             <div id="budgetPanel" class="panel">
               <h3>Budgets</h3>
               <div id="budgetReport" class="muted">No budgets set</div>
             </div>
 
             <div style="height:12px"></div>
-
-            <!-- keep a placeholder for transaction add shortcuts etc. -->
           </div>
 
           <aside>
+            <!-- Keep the working Daily Budgets panel only -->
             <div id="dailyBudgets" class="panel">
               <h4>Daily Budgets</h4>
               <div class="muted">No budgets set</div>
@@ -83,10 +80,7 @@
 
             <div style="height:12px"></div>
 
-            <div id="goalsPanel" class="panel">
-              <h4>Goals</h4>
-              <div id="goalsList" class="muted">No goals yet</div>
-            </div>
+            <!-- Goals removed from Home as requested -->
           </aside>
         </div>
       </section>
@@ -181,15 +175,15 @@
 
             <div style="height:12px"></div>
 
-            <div id="goalsPanel-dashboard-placeholder" class="panel" style="display:none">
+            <div id="goalsPanel" class="panel">
               <h4>Goals</h4>
-              <div id="goalsListDashboard" class="muted">No goals yet</div>
+              <div id="goalsList" class="muted">No goals yet</div>
             </div>
           </aside>
         </div>
       </section>
 
-      <!-- TRANSACTIONS (History) -->
+      <!-- TRANSACTIONS -->
       <section id="transactions" class="page" role="region" aria-labelledby="transactions-heading">
         <h2 id="transactions-heading" class="sr-only">Transactions</h2>
         <div class="panel head" style="display:flex;justify-content:space-between;align-items:center;">
