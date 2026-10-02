@@ -155,7 +155,6 @@
   }
 
   // fill any category select inputs (category select in add form and budget category select)
-  // Show ALL categories in every dropdown per request.
   function fillCategorySelects() {
     const categorySelect = $('category');
     if (categorySelect) {
@@ -236,7 +235,7 @@
     toast('All budgets cleared');
   }
 
-  // --- existing app logic (transactions, loans, sync) adapted to use saveState() and new category/budget flows ---
+  // --- existing app logic helpers ---
   function totals(xs) {
     return xs.reduce((r,t) => {
       const n = Number(t.amount) || 0;
@@ -264,7 +263,6 @@
   }
 
   function populateCategories() {
-    // The user requested all categories show in every dropdown - implement that here
     const s = $('category');
     if (!s) return;
     const list = (state.categories || []);
@@ -349,7 +347,7 @@
     `;
   }
 
-  // --- NEW: Budget summary & Goals rendering (used in Home/Dashboard) ---
+  // --- Budget & Goals ---
   function renderBudgetReportSummary() {
     const host = $('budgetReport');
     if (!host) return;
@@ -391,7 +389,7 @@
     }).join('');
   }
 
-  // --- Dashboard stats (new) ---
+  // --- Dashboard stats ---
   function renderDashboardStats() {
     const monthKey = currentMonth();
     const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
@@ -425,7 +423,7 @@
     const rhythmEl = $('rhythm'); if (rhythmEl) rhythmEl.textContent = String(rows.length || 0);
   }
 
-  // --- Trend chart rendering (vanilla canvas) ---
+  // --- Trend chart (unchanged) ---
   function getLastNMonthKeys(n = 12, endISO = today) {
     const [eyear, emonth] = (endISO || today).slice(0,7).split('-').map(Number);
     const months = [];
@@ -573,7 +571,6 @@
   }
 
   function renderTransactionsPage(pageIndex = 0) {
-    // pageIndex starts at 0
     const xs = (state.transactions || []).slice().reverse();
     const start = pageIndex * PAGE_SIZE;
     const end = Math.min(xs.length, start + PAGE_SIZE);
@@ -581,10 +578,8 @@
     const txTbody = $('txRows');
     if (!txTbody) return;
 
-    // If pageIndex is 0 -> replace; otherwise append (lazy load)
     if (pageIndex === 0) txTbody.innerHTML = '';
 
-    // Build rows
     const rowsHtml = slice.map(tx => {
       const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
       return `<tr>
@@ -597,12 +592,10 @@
 
     txTbody.insertAdjacentHTML('beforeend', rowsHtml);
 
-    // Update load more visibility
     const loadBtn = $('loadMoreTx');
     if (!loadBtn) return;
     if (end >= xs.length) loadBtn.style.display = 'none'; else loadBtn.style.display = 'inline-block';
 
-    // Update transactions count in header
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
 
@@ -655,7 +648,6 @@
     }
   }
 
-  // queueSync sends state to server. scheduleSync debounces calls.
   async function queueSync() {
     if (!state.settings || !state.settings.syncUrl) return;
     try {
@@ -683,7 +675,6 @@
     }
   }
 
-  // Debounced sync scheduler to avoid many rapid requests
   let _syncTimer = null;
   function scheduleSync(delay = 900) {
     if (_syncTimer) clearTimeout(_syncTimer);
@@ -697,7 +688,7 @@
     }, delay);
   }
 
-  // --- form submit and tab logic (keeps existing behavior) ---
+  // --- form submit and tabs ---
   async function saveTransactionForm(e) {
     e.preventDefault();
     const amountInput = $('amount'), dateInput = $('date'), noteInput = $('note'), categorySelect = $('category');
@@ -767,11 +758,15 @@
     updateNavDisplay(id);
     if (id === 'home') renderAll();
     if (id === 'transactions') {
-      // reset pagination and render first page when opening History
       txPageIndex = 0;
       renderTransactionsPage(0);
     }
-    if (id === 'settings') { const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || ''; const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver; }
+    if (id === 'settings') {
+      const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || '';
+      // ensure carryOver toggle is present and checked state synced
+      ensureCarryToggleExists();
+      const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver;
+    }
   }
 
   function handleGlobalClicks(e) {
@@ -807,7 +802,6 @@
     renderCategoriesList(); renderBudgetsList(); fillCategorySelects();
     renderBudgetReportSummary(); renderGoalsList(); renderTrendChart();
     renderDashboardStats();
-    // reset transaction counts and recent area if present
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
@@ -825,13 +819,11 @@
       state.settings = state.settings || {}; state.settings.theme = state.settings.theme === 'dark' ? 'light' : 'dark'; saveState(); applyTheme();
     }));
 
-    // category / budget events
     $('addCategory')?.addEventListener('click', addCategoryFromUI);
     $('resetDefaultCategories')?.addEventListener('click', resetDefaultCategories);
     $('addBudget')?.addEventListener('click', addBudgetFromUI);
     $('clearBudgets')?.addEventListener('click', clearBudgets);
 
-    // sync events
     $('saveSyncUrl')?.addEventListener('click', () => {
       const url = ($('syncUrlInput')?.value || '').trim(); state.settings = state.settings || {}; state.settings.syncUrl = url; saveState(); toast(url ? 'Sync URL saved' : 'Sync URL cleared');
     });
@@ -868,19 +860,7 @@
     $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); scheduleSync(); renderAll(); toast('Cleared'); });
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
 
-    // pagination load more button
-    $('loadMoreTx')?.addEventListener('click', () => {
-      txPageIndex = txPageIndex + 1;
-      renderTransactionsPage(txPageIndex);
-    });
-
-    // carry over toggle wiring
-    $('carryOverToggle')?.addEventListener('change', (e) => {
-      state.settings = state.settings || {};
-      state.settings.carryOver = !!e.target.checked;
-      saveState();
-      toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
-    });
+    $('loadMoreTx')?.addEventListener('click', () => { txPageIndex = txPageIndex + 1; renderTransactionsPage(txPageIndex); });
 
     window.addEventListener('resize', () => {
       updateNavDisplay(document.querySelector('.page.active')?.id || 'home');
@@ -889,10 +869,7 @@
   }
 
   // --- Carry over logic ---
-  function firstDayOfMonthISO(monthStr) {
-    // monthStr like '2026-10'
-    return `${monthStr}-01`;
-  }
+  function firstDayOfMonthISO(monthStr) { return `${monthStr}-01`; }
 
   function prevMonthKey(monthKey) {
     const [y, m] = monthKey.split('-').map(Number);
@@ -905,16 +882,12 @@
     try {
       if (!state.settings || !state.settings.carryOver) return;
       const nowMonth = today.slice(0,7);
-      // if we already applied for this month, skip
       if (state.lastCarryMonth === nowMonth) return;
-      // compute previous month
       const prev = prevMonthKey(nowMonth);
-      // compute remaining for previous month
       const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === prev);
       const t = totals(rows);
       const remainingMoney = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
       if (remainingMoney > 0) {
-        // add one auto income transaction dated first day of current month
         const tx = {
           id: uid('tx'),
           type: 'income',
@@ -931,7 +904,6 @@
         scheduleSync();
         toast(`Carried over ${money(remainingMoney)} to ${nowMonth}`);
       } else {
-        // mark applied to avoid re-checking
         state.lastCarryMonth = nowMonth;
         saveState();
       }
@@ -942,11 +914,50 @@
 
   // --- Init & helpers ---
   function initPaginationControls() {
-    // show/hide load more based on total transactions
     const loadBtn = $('loadMoreTx');
     if (!loadBtn) return;
     const total = (state.transactions || []).length;
     if (total > PAGE_SIZE) loadBtn.style.display = 'inline-block'; else loadBtn.style.display = 'none';
+  }
+
+  // If carry toggle is missing in HTML, inject it into Settings (non-invasive).
+  function ensureCarryToggleExists() {
+    if ($('carryOverToggle')) return;
+    const settingsPanels = document.querySelectorAll('#settings .panel');
+    // Try to append after the Theme panel (safe heuristic)
+    let themePanel = null;
+    settingsPanels.forEach(p => {
+      if (p.querySelector('h3') && p.querySelector('h3').textContent && p.querySelector('h3').textContent.trim().toLowerCase() === 'theme') themePanel = p;
+    });
+    const container = themePanel ? themePanel.parentElement : document.querySelector('#settings');
+    if (!container) return;
+    // Create panel element
+    const panel = document.createElement('div'); panel.className = 'panel'; panel.style.marginTop = '12px';
+    panel.innerHTML = `
+      <h3>Carry Over</h3>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <label for="carryOverToggle" style="margin:0;font-weight:600">Carry remaining to next month</label>
+        <input id="carryOverToggle" type="checkbox" />
+      </div>
+      <small class="muted">When enabled, positive remaining money for the month is added automatically as an income transaction at the start of next month.</small>
+    `;
+    // insert after themePanel if found, otherwise append to settings
+    if (themePanel && themePanel.parentElement) themePanel.parentElement.insertBefore(panel, themePanel.nextSibling);
+    else {
+      const settingsRoot = document.querySelector('#settings');
+      settingsRoot.appendChild(panel);
+    }
+    // wire toggle
+    const carry = $('carryOverToggle');
+    if (carry) {
+      carry.checked = !!state.settings?.carryOver;
+      carry.addEventListener('change', (e) => {
+        state.settings = state.settings || {};
+        state.settings.carryOver = !!e.target.checked;
+        saveState();
+        toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
+      });
+    }
   }
 
   function init() {
@@ -961,27 +972,28 @@
     applyTheme();
     wireEvents();
     wireTabs();
-    // apply carry over if needed (runs once on init)
     applyCarryOverIfNeeded();
     renderAll();
     initPaginationControls();
-    // render first transactions page in case user landed on history
     if (document.querySelector('.page.active')?.id === 'transactions') {
       txPageIndex = 0; renderTransactionsPage(0);
     }
     showPage('home');
   }
 
-  // expose for debugging
-  window.moneyflow = {
+  // Expose helpers so external callers (sync handlers, other scripts) won't get "not defined"
+  window.moneyflow = window.moneyflow || {};
+  Object.assign(window.moneyflow, {
     state,
     save: () => saveState(),
     renderAll,
     applyTheme,
     updateLoanRepaymentField,
     scheduleSync,
-    renderTransactionsPage
-  };
+    renderTransactionsPage,
+    renderHeaderStats,
+    renderBudgetReportSummary
+  });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once:true }); else init();
 
