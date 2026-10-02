@@ -7,6 +7,8 @@
   const q = sel => document.querySelector(sel);
   const today = new Date().toISOString().slice(0,10);
 
+  const PAGE_SIZE = 25; // pagination page size for transaction history
+
   const money = n => `${Math.round(Number(n) || 0).toLocaleString()} MMK`;
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -14,19 +16,9 @@
     try { return JSON.parse(s); } catch (e) { return fallback; }
   }
 
+  // Remove default categories - start empty so user can create unlimited categories.
   function defaultCategories() {
-    return [
-      { name: 'Food & Drinks', type: 'expense' },
-      { name: 'Transportation', type: 'expense' },
-      { name: 'Family', type: 'expense' },
-      { name: 'Housing', type: 'expense' },
-      { name: 'Utilities', type: 'expense' },
-      { name: 'Shopping', type: 'expense' },
-      { name: 'Health', type: 'expense' },
-      { name: 'Education', type: 'expense' },
-      { name: 'Salary', type: 'income' },
-      { name: 'Loan', type: 'income' }
-    ];
+    return [];
   }
 
   function fallback() {
@@ -36,9 +28,10 @@
       budgets: [], // {id, category, amount}
       goals: [],
       loans: [],
-      settings: { theme: 'light', syncUrl: '' },
+      settings: { theme: 'light', syncUrl: '', carryOver: false }, // carryOver default off
       reportMonth: today.slice(0,7),
-      currentType: 'expense'
+      currentType: 'expense',
+      lastCarryMonth: null // track which month carry over has been applied
     };
   }
 
@@ -67,6 +60,9 @@
   function saveState() {
     writeState(state);
   }
+
+  // pagination state for transactions page
+  let txPageIndex = 0;
 
   function repairTransactionIds() {
     let changed = false; (state.transactions || []).forEach(tx => {
@@ -115,8 +111,7 @@
       state.categories[idx].type = newType;
       saveState();
       renderCategoriesList();
-      populateCategories();
-      fillCategorySelects();
+      populateCategories(); fillCategorySelects();
       scheduleSync();
       toast('Category updated');
     }));
@@ -127,8 +122,7 @@
       state.categories.splice(idx,1);
       saveState();
       renderCategoriesList();
-      populateCategories();
-      fillCategorySelects();
+      populateCategories(); fillCategorySelects();
       scheduleSync();
       toast('Category deleted');
     }));
@@ -141,38 +135,36 @@
     if (!name) { toast('Category name required'); return; }
     // check duplicate
     if (state.categories.some(c => c.name.toLowerCase() === name.toLowerCase() && c.type === type)) { toast('Category exists'); return; }
-    state.categories.push({ name, type, createdAt: new Date().toISOString() });
+    state.categories.push({ id: uid('cat'), name, type, createdAt: new Date().toISOString() });
     saveState();
     scheduleSync();
     $('newCategoryName').value = '';
     renderCategoriesList();
-    populateCategories();
-    fillCategorySelects();
+    populateCategories(); fillCategorySelects();
     toast('Category added');
   }
 
   function resetDefaultCategories() {
-    if (!confirm('Reset categories to defaults? This will replace your categories list.')) return;
-    state.categories = defaultCategories();
+    if (!confirm('Clear all categories?')) return;
+    state.categories = [];
     saveState();
     scheduleSync();
     renderCategoriesList();
-    populateCategories();
-    fillCategorySelects();
-    toast('Categories reset to defaults');
+    populateCategories(); fillCategorySelects();
+    toast('Categories cleared');
   }
 
   // fill any category select inputs (category select in add form and budget category select)
+  // Show ALL categories in every dropdown per request.
   function fillCategorySelects() {
     const categorySelect = $('category');
     if (categorySelect) {
-      const list = (state.categories || []).filter(c => c.type === state.currentType);
+      const list = (state.categories || []);
       categorySelect.innerHTML = list.map(c => `<option>${esc(c.name)}</option>`).join('') || `<option>General</option>`;
     }
     const budgetCategorySelect = $('budgetCategorySelect');
     if (budgetCategorySelect) {
-      // show expense categories by default, but include all types
-      budgetCategorySelect.innerHTML = (state.categories || []).map(c => `<option value="${esc(c.name)}">${esc(c.name)} • ${esc(c.type)}</option>`).join('');
+      budgetCategorySelect.innerHTML = (state.categories || []).map(c => `<option value="${esc(c.name)}">${esc(c.name)} • ${esc(c.type)}</option>`).join('') || `<option>General</option>`;
     }
   }
 
@@ -221,7 +213,6 @@
     const amount = Number(($('newBudgetAmount')?.value || 0));
     if (!category) { toast('Choose a category'); return; }
     if (!amount || amount <= 0) { toast('Enter budget amount greater than 0'); return; }
-    // replace existing budget for same category
     state.budgets = state.budgets || [];
     const existing = state.budgets.find(b => b.category === category);
     if (existing) {
@@ -273,9 +264,10 @@
   }
 
   function populateCategories() {
+    // The user requested all categories show in every dropdown - implement that here
     const s = $('category');
     if (!s) return;
-    const list = (state.categories || []).filter(c => c.type === state.currentType);
+    const list = (state.categories || []);
     s.innerHTML = list.map(c => `<option>${esc(c.name)}</option>`).join('') || `<option>General</option>`;
   }
 
@@ -357,7 +349,7 @@
     `;
   }
 
-  // --- NEW: Budget summary & Goals rendering (used in Dashboard) ---
+  // --- NEW: Budget summary & Goals rendering (used in Home/Dashboard) ---
   function renderBudgetReportSummary() {
     const host = $('budgetReport');
     if (!host) return;
@@ -365,7 +357,6 @@
     if (!bs.length) { host.innerHTML = `<div class="muted">No budgets set</div>`; return; }
 
     const monthKey = currentMonth();
-    // For each budget, calculate spent this month (expense transactions matching category)
     const rows = bs.map(b => {
       const spent = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey && tx.type === 'expense' && tx.category === b.category)
         .reduce((s,t) => s + (Number(t.amount) || 0), 0);
@@ -404,13 +395,10 @@
   function renderDashboardStats() {
     const monthKey = currentMonth();
     const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
-    // cashflow = net (income - expense - loan - credit) for current month
     const t = totals(rows);
     const cashflow = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
-    const cfEl = $('cashflow');
-    if (cfEl) cfEl.textContent = money(cashflow);
+    const cfEl = $('cashflow'); if (cfEl) cfEl.textContent = money(cashflow);
 
-    // top spending (by category) for current month
     const expenseRows = rows.filter(tx => tx.type === 'expense');
     const spendByCat = {};
     expenseRows.forEach(tx => {
@@ -421,12 +409,9 @@
     for (const k in spendByCat) {
       if (spendByCat[k] > topAmt) { topAmt = spendByCat[k]; topCat = k; }
     }
-    const topSpendEl = $('topSpend');
-    if (topSpendEl) topSpendEl.textContent = topCat || '—';
-    const topAmtEl = $('topAmt');
-    if (topAmtEl) topAmtEl.textContent = money(topAmt);
+    const topSpendEl = $('topSpend'); if (topSpendEl) topSpendEl.textContent = topCat || '—';
+    const topAmtEl = $('topAmt'); if (topAmtEl) topAmtEl.textContent = money(topAmt);
 
-    // largest activity: single txn with largest absolute amount in month
     let largestLabel = '—', largestAmt = 0;
     if (rows.length) {
       const sorted = rows.slice().sort((a,b) => Math.abs(Number(b.amount)||0) - Math.abs(Number(a.amount)||0));
@@ -434,21 +419,17 @@
       largestLabel = l.category || l.note || l.type || '—';
       largestAmt = Number(l.amount) || 0;
     }
-    const largestEl = $('largest');
-    if (largestEl) largestEl.textContent = largestLabel;
-    const largestAmtEl = $('largestAmt');
-    if (largestAmtEl) largestAmtEl.textContent = money(largestAmt);
+    const largestEl = $('largest'); if (largestEl) largestEl.textContent = largestLabel;
+    const largestAmtEl = $('largestAmt'); if (largestAmtEl) largestAmtEl.textContent = money(largestAmt);
 
-    // entries count
-    const rhythmEl = $('rhythm');
-    if (rhythmEl) rhythmEl.textContent = String(rows.length || 0);
+    const rhythmEl = $('rhythm'); if (rhythmEl) rhythmEl.textContent = String(rows.length || 0);
   }
 
   // --- Trend chart rendering (vanilla canvas) ---
   function getLastNMonthKeys(n = 12, endISO = today) {
     const [eyear, emonth] = (endISO || today).slice(0,7).split('-').map(Number);
     const months = [];
-    let y = eyear, m = emonth - 1; // JS month 0-based
+    let y = eyear, m = emonth - 1;
     for (let i = n - 1; i >= 0; i--) {
       const d = new Date(Date.UTC(y, m - i, 1));
       const ky = d.getUTCFullYear();
@@ -459,7 +440,6 @@
   }
 
   function computeMonthlyNetFlow(monthKeys) {
-    // net flow = income - expense - loan - credit (consistent with header computations)
     const map = {};
     (state.transactions || []).forEach(tx => {
       const key = String(tx.date || '').slice(0,7);
@@ -477,7 +457,6 @@
   function renderTrendChart() {
     const canvas = $('chart');
     if (!canvas) return;
-    // responsive sizing
     const parentWidth = canvas.parentElement ? canvas.parentElement.clientWidth : canvas.clientWidth || 600;
     const height = 220;
     canvas.width = Math.max(300, parentWidth * devicePixelRatio);
@@ -490,23 +469,18 @@
     ctx.save();
     ctx.scale(devicePixelRatio, devicePixelRatio);
 
-    // Data
     const months = getLastNMonthKeys(12);
     const values = computeMonthlyNetFlow(months).map(v => Math.round(v));
-    // axes padding
     const padLeft = 40, padRight = 12, padTop = 12, padBottom = 30;
     const w = (canvas.width / devicePixelRatio) - padLeft - padRight;
     const h = (canvas.height / devicePixelRatio) - padTop - padBottom;
 
-    // find bounds
     let min = Math.min(...values);
     let max = Math.max(...values);
     if (min === Infinity || max === -Infinity) { min = 0; max = 0; }
-    // expand a bit for aesthetics
     const range = Math.max(1, max - min);
     max = Math.ceil(max + range * 0.1);
     min = Math.floor(min - range * 0.1);
-    // grid lines (4)
     ctx.strokeStyle = 'rgba(0,0,0,0.06)';
     ctx.lineWidth = 1;
     ctx.font = '12px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial';
@@ -518,20 +492,17 @@
       ctx.moveTo(padLeft, y);
       ctx.lineTo(padLeft + w, y);
       ctx.stroke();
-      // label
       const val = Math.round(max - (i * (max - min) / 4));
       ctx.fillText(`${val.toLocaleString()}`, 6, y + 4);
     }
 
-    // X labels
     ctx.textAlign = 'center';
     months.forEach((m, i) => {
       const x = padLeft + (w * (i / (months.length - 1 || 1)));
-      const lab = m.slice(5); // MM
+      const lab = m.slice(5);
       ctx.fillText(lab, x, padTop + h + 18);
     });
 
-    // line path
     ctx.beginPath();
     const points = values.map((v, i) => {
       const x = padLeft + (w * (i / (values.length - 1 || 1)));
@@ -539,7 +510,6 @@
       return { x, y };
     });
 
-    // draw fill (subtle)
     if (points.length) {
       ctx.moveTo(points[0].x, points[0].y);
       for (let p of points) ctx.lineTo(p.x, p.y);
@@ -550,19 +520,15 @@
       ctx.fill();
     }
 
-    // draw line
     ctx.beginPath();
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(62,149,205,1)';
     if (points.length) {
       ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x, points[i].y);
-      }
+      for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
       ctx.stroke();
     }
 
-    // draw points
     points.forEach((p, i) => {
       ctx.beginPath();
       ctx.fillStyle = 'white';
@@ -573,7 +539,6 @@
       ctx.stroke();
     });
 
-    // draw latest value box on top-right
     if (values.length) {
       const latest = values[values.length - 1];
       const txt = `${Math.round(latest).toLocaleString()} MMK`;
@@ -589,7 +554,7 @@
     ctx.restore();
   }
 
-  // --- Transactions rendering ---
+  // --- Transactions rendering with pagination/lazy loading ---
   function renderHeaderStats() {
     const xs = (state.transactions || []).filter(t => String(t.date || '').slice(0,7) === currentMonth());
     const t = totals(xs);
@@ -607,60 +572,48 @@
     });
   }
 
-  function renderTransactions() {
+  function renderTransactionsPage(pageIndex = 0) {
+    // pageIndex starts at 0
     const xs = (state.transactions || []).slice().reverse();
-    const recentDiv = $('recent'); const recentTbody = $('recentRows'); const txTbody = $('txRows');
-    if (!xs.length) {
-      if (recentDiv) recentDiv.innerHTML = `<div class="muted">No transactions</div>`;
-      if (recentTbody) recentTbody.innerHTML = `<tr><td colspan="4" class="muted">No transactions</td></tr>`;
-      if (txTbody) txTbody.innerHTML = `<tr><td colspan="4" class="muted">No transactions</td></tr>`;
-      return;
-    }
+    const start = pageIndex * PAGE_SIZE;
+    const end = Math.min(xs.length, start + PAGE_SIZE);
+    const slice = xs.slice(start, end);
+    const txTbody = $('txRows');
+    if (!txTbody) return;
 
-    if (recentDiv) {
-      recentDiv.innerHTML = xs.slice(0,5).map(tx => {
-        const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
-        return `<div class="row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--card);margin-bottom:6px">
-                  <div>
-                    <div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div>
-                    <small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small>
-                  </div>
-                  <div>${right}</div>
-                </div>`;
-      }).join('');
-    }
+    // If pageIndex is 0 -> replace; otherwise append (lazy load)
+    if (pageIndex === 0) txTbody.innerHTML = '';
 
-    if (recentTbody) {
-      recentTbody.innerHTML = xs.slice(0,8).map(tx => {
-        const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
-        return `<tr>
-          <td>${esc(tx.date || '')}</td>
-          <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
-          <td>${right}</td>
-          <td></td>
-        </tr>`;
-      }).join('');
-    }
+    // Build rows
+    const rowsHtml = slice.map(tx => {
+      const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
+      return `<tr>
+        <td>${esc(tx.date || '')}</td>
+        <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
+        <td>${right}</td>
+        <td><button data-remove="${tx.id}" aria-label="Delete transaction" class="small delete">Delete</button></td>
+      </tr>`;
+    }).join('');
 
-    if (txTbody) {
-      txTbody.innerHTML = xs.map(tx => {
-        const right = tx.type === 'income' ? `<b style="color:green">${money(tx.amount)}</b>` : `<b>${money(tx.amount)}</b>`;
-        // ADD Delete button in Transactions (History) table only
-        return `<tr>
-          <td>${esc(tx.date || '')}</td>
-          <td><div style="font-weight:700">${esc(tx.category || tx.note || tx.type)}</div><small class="muted">${esc(tx.note || '')} ${tx.loanId ? ' • ' + esc(tx.loanId) : ''}</small></td>
-          <td>${right}</td>
-          <td><button data-remove="${tx.id}" aria-label="Delete transaction" class="small delete">Delete</button></td>
-        </tr>`;
-      }).join('');
-    }
+    txTbody.insertAdjacentHTML('beforeend', rowsHtml);
+
+    // Update load more visibility
+    const loadBtn = $('loadMoreTx');
+    if (!loadBtn) return;
+    if (end >= xs.length) loadBtn.style.display = 'none'; else loadBtn.style.display = 'inline-block';
+
+    // Update transactions count in header
+    if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
 
-  // Replace existing api() with a hardened, form-encoded POST to avoid CORS preflight and produce clearer errors.
+  function resetTransactionPagination() {
+    txPageIndex = 0;
+    renderTransactionsPage(0);
+  }
+
+  // API helpers
   async function api(action, payload = {}) {
     if (!state.settings || !state.settings.syncUrl) throw new Error('Add the Apps Script URL first.');
-
-    // Prepare form-encoded body
     const params = new URLSearchParams();
     params.append('action', action);
     params.append('payload', JSON.stringify(payload));
@@ -683,7 +636,6 @@
       throw new Error('Network error when contacting sync endpoint: ' + String(fetchErr));
     }
 
-    // Try to parse JSON, fallback to text for better diagnostics
     const text = await r.text().catch(() => null);
     let parsed = null;
     if (text) {
@@ -695,7 +647,6 @@
       throw new Error('Sync failed: ' + bodyMsg);
     }
 
-    // If parsed JSON available return it, otherwise attempt to return text wrapped
     if (parsed) return parsed;
     try {
       return { ok: true, data: text ? safeParse(text, {}) : {} };
@@ -717,7 +668,6 @@
       };
       const res = await api('replaceAll', payload);
       if (res && res.data) {
-        // update client state using authoritative server data (if provided)
         state.transactions = res.data.transactions || state.transactions || [];
         state.loans = res.data.loans || state.loans || [];
         state.categories = res.data.categories || state.categories || [];
@@ -726,11 +676,9 @@
         saveState();
         renderAll();
       }
-      // success toast is handled by caller or testSync; avoid verbose toasts here
       return res;
     } catch (e) {
       console.warn('sync failed', e);
-      // bubble error up so callers can show toasts if needed
       throw e;
     }
   }
@@ -744,7 +692,6 @@
       try {
         await queueSync();
       } catch (e) {
-        // show a lightweight message but don't block app
         console.warn('Scheduled sync failed:', e);
       }
     }, delay);
@@ -782,8 +729,7 @@
     }
     saveState();
     updateLoanRepaymentField(); renderAll(); toast('Saved');
-    // schedule sync (debounced)
-    try { scheduleSync(); } catch (_) {}
+    scheduleSync();
     showPage('home'); const form = $('form'); if (form) form.reset(); if ($('date')) $('date').value = today;
   }
 
@@ -820,7 +766,12 @@
     document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === id));
     updateNavDisplay(id);
     if (id === 'home') renderAll();
-    if (id === 'settings') { const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || ''; }
+    if (id === 'transactions') {
+      // reset pagination and render first page when opening History
+      txPageIndex = 0;
+      renderTransactionsPage(0);
+    }
+    if (id === 'settings') { const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || ''; const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver; }
   }
 
   function handleGlobalClicks(e) {
@@ -838,8 +789,7 @@
       const id = rem.dataset.remove;
       if (id) {
         state.transactions = (state.transactions || []).filter(t => String(t.id) !== String(id));
-        saveState(); renderAll();
-        scheduleSync();
+        saveState(); renderAll(); scheduleSync();
       }
       return;
     }
@@ -853,11 +803,11 @@
   }
 
   function renderAll() {
-    greeting(); populateCategories(); renderHeaderStats(); renderTransactions(); renderLoanSummary(); updateLoanRepaymentField();
+    greeting(); populateCategories(); renderHeaderStats(); renderLoanSummary(); updateLoanRepaymentField();
     renderCategoriesList(); renderBudgetsList(); fillCategorySelects();
     renderBudgetReportSummary(); renderGoalsList(); renderTrendChart();
-    renderDashboardStats(); // <-- update dashboard metrics correctly
-    if ($('month')) $('month').value = currentMonth();
+    renderDashboardStats();
+    // reset transaction counts and recent area if present
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
@@ -889,23 +839,13 @@
       const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
       state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
       try {
-        // quick ping to check endpoint responsiveness
         const ping = await api('ping', {});
         if (ping && (ping.ok || ping.message)) {
-          // if ping succeeded, run a push to confirm write access
-          try {
-            await queueSync();
-            toast('Test sync done');
-          } catch (e) {
-            toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e)));
-          }
+          try { await queueSync(); toast('Test sync done'); } catch (e) { toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e))); }
         } else {
           toast('Ping did not return expected response');
         }
-      } catch (e) {
-        console.warn('ping failed', e);
-        toast('Ping failed: ' + (e && e.message ? e.message : String(e)));
-      }
+      } catch (e) { console.warn('ping failed', e); toast('Ping failed: ' + (e && e.message ? e.message : String(e))); }
     });
     $('pullFromSheets')?.addEventListener('click', async () => {
       const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
@@ -928,11 +868,85 @@
     $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); scheduleSync(); renderAll(); toast('Cleared'); });
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
 
+    // pagination load more button
+    $('loadMoreTx')?.addEventListener('click', () => {
+      txPageIndex = txPageIndex + 1;
+      renderTransactionsPage(txPageIndex);
+    });
+
+    // carry over toggle wiring
+    $('carryOverToggle')?.addEventListener('change', (e) => {
+      state.settings = state.settings || {};
+      state.settings.carryOver = !!e.target.checked;
+      saveState();
+      toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
+    });
+
     window.addEventListener('resize', () => {
       updateNavDisplay(document.querySelector('.page.active')?.id || 'home');
-      // re-render chart responsively
       renderTrendChart();
     });
+  }
+
+  // --- Carry over logic ---
+  function firstDayOfMonthISO(monthStr) {
+    // monthStr like '2026-10'
+    return `${monthStr}-01`;
+  }
+
+  function prevMonthKey(monthKey) {
+    const [y, m] = monthKey.split('-').map(Number);
+    let py = y, pm = m - 1;
+    if (pm < 1) { pm = 12; py = y - 1; }
+    return `${py}-${String(pm).padStart(2,'0')}`;
+  }
+
+  function applyCarryOverIfNeeded() {
+    try {
+      if (!state.settings || !state.settings.carryOver) return;
+      const nowMonth = today.slice(0,7);
+      // if we already applied for this month, skip
+      if (state.lastCarryMonth === nowMonth) return;
+      // compute previous month
+      const prev = prevMonthKey(nowMonth);
+      // compute remaining for previous month
+      const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === prev);
+      const t = totals(rows);
+      const remainingMoney = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
+      if (remainingMoney > 0) {
+        // add one auto income transaction dated first day of current month
+        const tx = {
+          id: uid('tx'),
+          type: 'income',
+          amount: Number(remainingMoney),
+          category: 'Carry Over',
+          note: `Carry over from ${prev}`,
+          date: firstDayOfMonthISO(nowMonth),
+          createdAt: new Date().toISOString(),
+          autoCarry: true
+        };
+        state.transactions.push(tx);
+        state.lastCarryMonth = nowMonth;
+        saveState();
+        scheduleSync();
+        toast(`Carried over ${money(remainingMoney)} to ${nowMonth}`);
+      } else {
+        // mark applied to avoid re-checking
+        state.lastCarryMonth = nowMonth;
+        saveState();
+      }
+    } catch (e) {
+      console.warn('carry over failed', e);
+    }
+  }
+
+  // --- Init & helpers ---
+  function initPaginationControls() {
+    // show/hide load more based on total transactions
+    const loadBtn = $('loadMoreTx');
+    if (!loadBtn) return;
+    const total = (state.transactions || []).length;
+    if (total > PAGE_SIZE) loadBtn.style.display = 'inline-block'; else loadBtn.style.display = 'none';
   }
 
   function init() {
@@ -942,11 +956,19 @@
     state.budgets = Array.isArray(state.budgets) ? state.budgets : [];
     state.loans = Array.isArray(state.loans) ? state.loans : [];
     state.goals = Array.isArray(state.goals) ? state.goals : [];
+    if (!state.settings) state.settings = { theme: 'light', syncUrl: '', carryOver: false };
     repairTransactionIds();
     applyTheme();
     wireEvents();
     wireTabs();
+    // apply carry over if needed (runs once on init)
+    applyCarryOverIfNeeded();
     renderAll();
+    initPaginationControls();
+    // render first transactions page in case user landed on history
+    if (document.querySelector('.page.active')?.id === 'transactions') {
+      txPageIndex = 0; renderTransactionsPage(0);
+    }
     showPage('home');
   }
 
@@ -957,7 +979,8 @@
     renderAll,
     applyTheme,
     updateLoanRepaymentField,
-    scheduleSync
+    scheduleSync,
+    renderTransactionsPage
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once:true }); else init();
