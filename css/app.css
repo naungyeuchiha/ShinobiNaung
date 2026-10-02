@@ -10,6 +10,7 @@
   --accent-soft: rgba(37, 99, 235, 0.12);
   --success: #16a34a;
   --danger: #dc2626;
+  --warning: #f59e0b;
   --shadow: rgba(15, 23, 42, 0.08);
 }
 body.dark{
@@ -23,6 +24,7 @@ body.dark{
   --accent-soft: rgba(96, 165, 250, 0.18);
   --success: #4ade80;
   --danger: #f87171;
+  --warning: #fbbf24;
   --shadow: rgba(2, 6, 23, 0.45);
 }
 
@@ -151,12 +153,7 @@ button.primary { background: var(--accent); color: #fff; border: none; padding: 
 .hidden { display: none !important; }
 .sr-only { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
 
-/* ---------------------------
-   Small / action / delete button styles
-   Keep styles theme-aware by using CSS variables.
-   --------------------------- */
-
-/* Generic small button used in settings and row actions */
+/* small action/delete button styles */
 button.small {
   font-size: .85rem;
   padding: 6px 8px;
@@ -167,37 +164,39 @@ button.small {
   cursor: pointer;
 }
 
-/* Delete/negative action style — subtle, theme-aware */
 button.small.delete,
 button[data-remove] {
   background: transparent;
   color: var(--danger);
   border: 1px solid rgba(0,0,0,0.06);
 }
-
-/* A slightly stronger hover for delete to make affordance clear without changing theme */
 button.small.delete:hover,
 button[data-remove]:hover {
-  background: rgba(220, 38, 38, 0.08); /* uses a faint red accent */
+  background: rgba(220, 38, 38, 0.08);
   color: var(--danger);
 }
-
-/* Ensure delete button does not produce large box-shadows */
 button.small.delete,
-button[data-remove] {
-  box-shadow: none;
-}
-
-/* Keep table buttons aligned and compact */
-.table button {
-  font-size: .9rem;
-  padding: 6px 8px;
-  border-radius: 8px;
-  min-width: 56px;
-}
-
-/* In dark mode ensure border and hover are visible */
+button[data-remove] { box-shadow: none; }
+.table button { font-size: .9rem; padding: 6px 8px; border-radius: 8px; min-width: 56px; }
 body.dark button.small.delete,
-body.dark button[data-remove] {
-  border-color: rgba(255,255,255,0.04);
-}
+body.dark button[data-remove] { border-color: rgba(255,255,255,0.04); }
+
+/* ----------------------------
+   Budget progress bar styles
+   Uses theme variables; minimal and non-invasive.
+   ---------------------------- */
+.budget-row { display:flex; gap:12px; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px dashed var(--line); }
+.budget-meta { flex:1; }
+.budget-meta strong { display:block; font-weight:700; }
+.budget-meta .muted { font-size:0.9rem; color:var(--muted); }
+.budget-stats { width:220px; text-align:right; font-size:0.9rem; color:var(--muted); }
+.budget-bar { width:100%; background:var(--line); height:12px; border-radius:8px; overflow:hidden; margin-top:6px; }
+.budget-bar .fill { height:100%; width:0%; background:var(--accent); transition: width .4s ease, background .2s ease; border-radius:8px; }
+
+/* color variants via inline background color computed in JS; keep CSS minimal */
+
+/* small polish for budget percentages */
+.budget-pct { font-weight:700; margin-left:8px; }
+
+/* prefer reduced motion */
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
