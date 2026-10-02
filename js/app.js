@@ -7,7 +7,7 @@
   const q = sel => document.querySelector(sel);
   const today = new Date().toISOString().slice(0,10);
 
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = 25; // pagination page size
 
   const money = n => `${Math.round(Number(n) || 0).toLocaleString()} MMK`;
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -16,9 +16,7 @@
     try { return JSON.parse(s); } catch (e) { return fallback; }
   }
 
-  function defaultCategories() {
-    return [];
-  }
+  function defaultCategories() { return []; }
 
   function fallback() {
     return {
@@ -30,33 +28,28 @@
       settings: { theme: 'light', syncUrl: '', carryOver: false },
       reportMonth: today.slice(0,7),
       currentType: 'expense',
-      lastCarryMonth: null
+      lastCarryMonth: null,
+      budgetAlerts: {}, // track alert levels per category
+      budgetsLastRefreshedMonth: null
     };
   }
 
   function readState() {
-    try {
-      return Object.assign({}, fallback(), safeParse(localStorage.getItem(KEY) || 'null', {}));
-    } catch (e) { return fallback(); }
+    try { return Object.assign({}, fallback(), safeParse(localStorage.getItem(KEY) || 'null', {})); } catch (e) { return fallback(); }
   }
 
-  function writeState(s) {
-    try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
-  }
+  function writeState(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
 
   let state = readState();
 
   function toast(msg) {
     const t = $('toast'); if (!t) return;
     t.textContent = msg; t.classList.add('on'); t.style.display = 'block';
-    clearTimeout(t._t); t._t = setTimeout(() => { t.classList.remove('on'); t.style.display = 'none'; }, 2200);
+    clearTimeout(t._t); t._t = setTimeout(() => { t.classList.remove('on'); t.style.display = 'none'; }, 2600);
   }
 
   function uid(prefix='id') { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`; }
-
-  function saveState() {
-    writeState(state);
-  }
+  function saveState() { writeState(state); }
 
   let txPageIndex = 0;
 
@@ -66,14 +59,14 @@
       if (!tx.createdAt) { tx.createdAt = Date.now(); changed = true; }
       if (!tx.date) { tx.date = today; changed = true; }
     });
-    if (changed) {
-      saveState();
-      scheduleSync();
-    }
+    if (changed) { saveState(); scheduleSync(); }
   }
 
   function currentMonth() { return state.reportMonth || today.slice(0,7); }
 
+  /* -------------------------
+     Categories & Budgets UI
+     ------------------------- */
   function renderCategoriesList() {
     const holder = $('categoriesList');
     if (!holder) return;
@@ -92,7 +85,6 @@
         </div>
       </div>`;
     }).join('');
-
     holder.querySelectorAll('button.edit').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const c = state.categories[idx];
@@ -109,7 +101,6 @@
       scheduleSync();
       toast('Category updated');
     }));
-
     holder.querySelectorAll('button.delete').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const c = state.categories[idx];
@@ -121,7 +112,6 @@
       scheduleSync();
       toast('Category deleted');
     }));
-
     fillCategorySelects();
   }
 
@@ -161,6 +151,7 @@
     }
   }
 
+  /* ---------- Budgets ---------- */
   function renderBudgetsList() {
     const holder = $('budgetsList');
     if (!holder) return;
@@ -175,7 +166,6 @@
         </div>
       </div>`;
     }).join('');
-
     holder.querySelectorAll('button.edit-budget').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const b = state.budgets[idx];
@@ -189,7 +179,6 @@
       renderBudgetsList();
       toast('Budget updated');
     }));
-
     holder.querySelectorAll('button.delete-budget').forEach(btn => btn.addEventListener('click', () => {
       const idx = +btn.dataset.idx;
       const b = state.budgets[idx];
@@ -209,11 +198,7 @@
     if (!amount || amount <= 0) { toast('Enter budget amount greater than 0'); return; }
     state.budgets = state.budgets || [];
     const existing = state.budgets.find(b => b.category === category);
-    if (existing) {
-      existing.amount = amount;
-    } else {
-      state.budgets.push({ id: uid('bud'), category, amount, createdAt: new Date().toISOString() });
-    }
+    if (existing) existing.amount = amount; else state.budgets.push({ id: uid('bud'), category, amount, createdAt: new Date().toISOString() });
     saveState();
     scheduleSync();
     $('newBudgetAmount').value = '';
@@ -230,6 +215,7 @@
     toast('All budgets cleared');
   }
 
+  /* ---------- Transactions & Loans (unchanged logic) ---------- */
   function totals(xs) {
     return xs.reduce((r,t) => {
       const n = Number(t.amount) || 0;
@@ -289,10 +275,7 @@
         changed = true;
       }
     });
-    if (changed) {
-      saveState();
-      scheduleSync();
-    }
+    if (changed) { saveState(); scheduleSync(); }
   }
 
   function applyRepayments() {
@@ -312,10 +295,7 @@
         }
       }
     });
-    if (changed) {
-      saveState();
-      scheduleSync();
-    }
+    if (changed) { saveState(); scheduleSync(); }
   }
 
   function renderLoanSummary() {
@@ -341,47 +321,70 @@
     `;
   }
 
+  /* ----------------------------
+     Budget report: colorful progress bars + alerts
+     ---------------------------- */
   function renderBudgetReportSummary() {
     const host = $('budgetReport');
     if (!host) return;
     const bs = state.budgets || [];
+    // ensure alerts map exists
+    state.budgetAlerts = state.budgetAlerts || {};
+
     if (!bs.length) { host.innerHTML = `<div class="muted">No budgets set</div>`; return; }
 
     const monthKey = currentMonth();
-    const rows = bs.map(b => {
+    const rowsHtml = bs.map(b => {
       const spent = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey && tx.type === 'expense' && tx.category === b.category)
         .reduce((s,t) => s + (Number(t.amount) || 0), 0);
       const remaining = Math.max(0, (Number(b.amount) || 0) - spent);
-      return { category: b.category, budget: Number(b.amount) || 0, spent, remaining };
+      const pct = (Number(b.amount) || 0) > 0 ? Math.round((spent / (Number(b.amount)||1)) * 100) : 0;
+      const clampedPct = Math.max(0, Math.min(100, pct));
+      // pick color (we'll inline style the .fill background)
+      let color = 'var(--accent)';
+      if (clampedPct >= 100) color = 'var(--danger)';
+      else if (clampedPct >= 90) color = 'var(--warning)';
+      else color = 'var(--accent)';
+
+      return { category: b.category, budget: Number(b.amount)||0, spent, remaining, pct: clampedPct, color };
+    }).map(r => {
+      const bar = `<div class="budget-bar" aria-hidden="true"><div class="fill" style="width:${r.pct}%; background:${r.color};"></div></div>`;
+      const right = `<div class="budget-stats"><div><small class="muted">Spent</small> <b>${money(r.spent)}</b> <span class="budget-pct">${r.pct}%</span></div><div><small class="muted">Remaining</small> <b>${money(r.remaining)}</b></div></div>`;
+      return `<div class="budget-row">
+        <div class="budget-meta"><strong>${esc(r.category)}</strong><div class="muted">Budget: ${money(r.budget)}</div>${bar}</div>
+        ${right}
+      </div>`;
+    }).join('');
+
+    host.innerHTML = rowsHtml;
+
+    // Alerting: check thresholds and notify when level changes
+    let alertsChanged = false;
+    bs.forEach(b => {
+      const spent = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey && tx.type === 'expense' && tx.category === b.category)
+        .reduce((s,t) => s + (Number(t.amount) || 0), 0);
+      const pct = (Number(b.amount) || 0) > 0 ? Math.round((spent / (Number(b.amount)||1)) * 100) : 0;
+      const level = pct >= 100 ? 'over' : (pct >= 90 ? 'near' : 'ok');
+      const prev = (state.budgetAlerts && state.budgetAlerts[b.category]) || 'ok';
+      if (level !== prev) {
+        // only show toast when we reach 'near' or 'over'
+        if (level === 'near') {
+          toast(`Budget nearly consumed for ${b.category}: ${pct}% used`);
+        } else if (level === 'over') {
+          const overAmt = Math.max(0, Math.round(spent - (Number(b.amount)||0)));
+          toast(`Budget exceeded for ${b.category}: over by ${money(overAmt)}`);
+        }
+        state.budgetAlerts = state.budgetAlerts || {};
+        state.budgetAlerts[b.category] = level;
+        alertsChanged = true;
+      }
     });
-
-    host.innerHTML = rows.map(r => {
-      return `<div class="row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)">
-        <div><strong>${esc(r.category)}</strong><small class="muted">Budget</small></div>
-        <div style="text-align:right">
-          <div><small class="muted">Spent</small><div><b>${money(r.spent)}</b></div></div>
-          <div style="margin-top:4px"><small class="muted">Remaining</small><div><b>${money(r.remaining)}</b></div></div>
-        </div>
-      </div>`;
-    }).join('');
+    if (alertsChanged) saveState();
   }
 
-  function renderGoalsList() {
-    const host = $('goalsList');
-    if (!host) return;
-    const gs = state.goals || [];
-    if (!gs.length) { host.innerHTML = `<div class="muted">No goals yet</div>`; return; }
-    host.innerHTML = gs.map(g => {
-      const progress = Number(g.progress) || 0;
-      const target = Number(g.target) || 0;
-      const pct = target > 0 ? Math.round((progress / target) * 100) : 0;
-      return `<div class="row" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line)">
-        <div><strong>${esc(g.title || g.name || 'Goal')}</strong><small class="muted">${esc(g.note || '')}</small></div>
-        <div style="text-align:right"><small class="muted">${pct}%</small><div><b>${money(progress)}</b></div></div>
-      </div>`;
-    }).join('');
-  }
-
+  /* ----------------------------
+     Dashboard & trend (unchanged)
+     ---------------------------- */
   function renderDashboardStats() {
     const monthKey = currentMonth();
     const rows = (state.transactions || []).filter(tx => String(tx.date || '').slice(0,7) === monthKey);
@@ -565,9 +568,7 @@
     const start = pageIndex * PAGE_SIZE;
     const end = Math.min(xs.length, start + PAGE_SIZE);
     const slice = xs.slice(start, end);
-    const txTbody = $('txRows');
-    if (!txTbody) return;
-
+    const txTbody = $('txRows'); if (!txTbody) return;
     if (pageIndex === 0) txTbody.innerHTML = '';
 
     const rowsHtml = slice.map(tx => {
@@ -583,117 +584,61 @@
     txTbody.insertAdjacentHTML('beforeend', rowsHtml);
 
     const loadBtn = $('loadMoreTx');
-    if (loadBtn) {
-      if (end >= xs.length) loadBtn.style.display = 'none'; else loadBtn.style.display = 'inline-block';
-    }
-
+    if (loadBtn) { if (end >= xs.length) loadBtn.style.display = 'none'; else loadBtn.style.display = 'inline-block'; }
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
   }
 
-  function resetTransactionPagination() {
-    txPageIndex = 0;
-    renderTransactionsPage(0);
-  }
-
-  // CORS-safe sync
+  /* ----------------------------
+     Sync helpers (CORS-safe)
+     ---------------------------- */
   function jsonpGet(url, params = {}) {
     return new Promise((resolve, reject) => {
       const cbName = `mf_jsonp_cb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
-      window[cbName] = function(res) {
-        try { resolve(res); } finally { try { delete window[cbName]; } catch (e) {} }
-      };
+      window[cbName] = function(res) { try { resolve(res); } finally { try { delete window[cbName]; } catch(e){} } };
       const qs = Object.keys(params || {}).map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');
       const sep = url.indexOf('?') === -1 ? '?' : '&';
       const src = `${url}${sep}${qs}${qs ? '&' : ''}callback=${cbName}`;
-      const script = document.createElement('script');
-      script.src = src;
-      script.async = true;
-      script.onerror = () => {
-        try { delete window[cbName]; } catch (_) {}
-        reject(new Error('JSONP failed to load script'));
-      };
+      const script = document.createElement('script'); script.src = src; script.async = true;
+      script.onerror = () => { try { delete window[cbName]; } catch(_){}; reject(new Error('JSONP failed')); };
       document.head.appendChild(script);
-      setTimeout(() => { if (script && script.parentNode) script.parentNode.removeChild(script); }, 30_000);
+      setTimeout(() => { if (script && script.parentNode) script.parentNode.removeChild(script); }, 30000);
     });
   }
 
   function postViaIframe(url, action, payload = {}) {
     return new Promise((resolve, reject) => {
       const frameName = `mf_frame_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
-      const iframe = document.createElement('iframe');
-      iframe.name = frameName;
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
-
-      function cleanup() {
-        try { window.removeEventListener('message', onMessage); } catch (e) {}
-        try { if (form && form.parentNode) form.parentNode.removeChild(form); } catch (e) {}
-        try { if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (e) {}
-        clearTimeout(to);
-      }
-
+      const iframe = document.createElement('iframe'); iframe.name = frameName; iframe.style.display = 'none'; document.body.appendChild(iframe);
+      function cleanup() { try { window.removeEventListener('message', onMessage); } catch(e){}; try { if (form && form.parentNode) form.parentNode.removeChild(form); } catch(e){}; try { if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch(e){}; clearTimeout(to); }
       function onMessage(e) {
         try {
           const data = e.data;
-          if (data && (data.ok === true || data.ok === false || data.error)) {
-            cleanup();
-            resolve(data);
-          }
+          if (data && (data.ok === true || data.ok === false || data.error)) { cleanup(); resolve(data); }
         } catch (_) {}
       }
       window.addEventListener('message', onMessage, false);
-
       const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = url;
-      form.target = frameName;
-      form.style.display = 'none';
-
-      const inputAction = document.createElement('input');
-      inputAction.type = 'hidden';
-      inputAction.name = 'action';
-      inputAction.value = action;
-
-      const inputPayload = document.createElement('input');
-      inputPayload.type = 'hidden';
-      inputPayload.name = 'payload';
-      inputPayload.value = JSON.stringify(payload);
-
-      form.appendChild(inputAction);
-      form.appendChild(inputPayload);
-      document.body.appendChild(form);
-
-      const to = setTimeout(() => {
-        cleanup();
-        reject(new Error('sync iframe POST timed out'));
-      }, 30_000);
-
-      try {
-        form.submit();
-      } catch (err) {
-        cleanup();
-        reject(err);
-      }
+      form.method = 'POST'; form.action = url; form.target = frameName; form.style.display = 'none';
+      const inputAction = document.createElement('input'); inputAction.type='hidden'; inputAction.name='action'; inputAction.value = action;
+      const inputPayload = document.createElement('input'); inputPayload.type='hidden'; inputPayload.name='payload'; inputPayload.value = JSON.stringify(payload);
+      form.appendChild(inputAction); form.appendChild(inputPayload); document.body.appendChild(form);
+      const to = setTimeout(() => { cleanup(); reject(new Error('sync iframe POST timed out')); }, 30000);
+      try { form.submit(); } catch (err) { cleanup(); reject(err); }
     });
   }
 
   async function api(action, payload = {}) {
-    const url = state.settings && state.settings.syncUrl;
-    if (!url) throw new Error('Add the Apps Script URL first.');
-
+    const url = state.settings && state.settings.syncUrl; if (!url) throw new Error('Add the Apps Script URL first.');
     if (action === 'getAll' || action === 'ping') {
       try {
         const res = await fetch(url + `?action=${encodeURIComponent(action)}`, { method: 'GET', cache: 'no-store' });
         if (res.ok) {
-          const text = await res.text().catch(() => null);
+          const text = await res.text().catch(()=>null);
           try { return JSON.parse(text); } catch (e) {}
         }
-      } catch (e) {
-        // fallback below
-      }
+      } catch (e) {}
       return jsonpGet(url, { action });
     }
-
     try {
       const params = new URLSearchParams();
       params.append('action', action);
@@ -703,37 +648,21 @@
         mode: 'cors',
         cache: 'no-store',
         redirect: 'follow',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-          'Accept': 'application/json, text/plain, */*'
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'Accept':'application/json, text/plain, */*' },
         body: params.toString()
       });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => null);
-        throw new Error(`Sync failed: ${txt || ('status ' + res.status)}`);
-      }
-      const text = await res.text().catch(() => null);
-      try { return JSON.parse(text); } catch (e) { return { ok: true, data: safeParse(text, {}) }; }
+      if (!res.ok) { const txt = await res.text().catch(()=>null); throw new Error(`Sync failed: ${txt || ('status ' + res.status)}`); }
+      const text = await res.text().catch(()=>null);
+      try { return JSON.parse(text); } catch (e) { return { ok:true, data: safeParse(text, {}) }; }
     } catch (fetchErr) {
-      try {
-        return await postViaIframe(url, action, payload);
-      } catch (iframeErr) {
-        throw new Error('Network error when contacting sync endpoint: ' + String(iframeErr));
-      }
+      try { return await postViaIframe(url, action, payload); } catch (iframeErr) { throw new Error('Network error when contacting sync endpoint: ' + String(iframeErr)); }
     }
   }
 
   async function queueSync() {
     if (!state.settings || !state.settings.syncUrl) return;
     try {
-      const payload = {
-        transactions: state.transactions || [],
-        categories: state.categories || [],
-        budgets: state.budgets || [],
-        goals: state.goals || [],
-        loans: state.loans || []
-      };
+      const payload = { transactions: state.transactions || [], categories: state.categories || [], budgets: state.budgets || [], goals: state.goals || [], loans: state.loans || [] };
       const res = await api('replaceAll', payload);
       if (res && res.data) {
         state.transactions = res.data.transactions || state.transactions || [];
@@ -745,25 +674,13 @@
         renderAll();
       }
       return res;
-    } catch (e) {
-      console.warn('sync failed', e);
-      throw e;
-    }
+    } catch (e) { console.warn('sync failed', e); throw e; }
   }
 
   let _syncTimer = null;
-  function scheduleSync(delay = 900) {
-    if (_syncTimer) clearTimeout(_syncTimer);
-    _syncTimer = setTimeout(async () => {
-      _syncTimer = null;
-      try {
-        await queueSync();
-      } catch (e) {
-        console.warn('Scheduled sync failed:', e);
-      }
-    }, delay);
-  }
+  function scheduleSync(delay = 900) { if (_syncTimer) clearTimeout(_syncTimer); _syncTimer = setTimeout(async () => { _syncTimer = null; try { await queueSync(); } catch (e) { console.warn('Scheduled sync failed:', e); } }, delay); }
 
+  /* ---------- transaction form & tabs ---------- */
   async function saveTransactionForm(e) {
     e.preventDefault();
     const amountInput = $('amount'), dateInput = $('date'), noteInput = $('note'), categorySelect = $('category');
@@ -775,7 +692,6 @@
     const note = noteInput?.value || '';
     const category = categorySelect?.value || '';
     let tx;
-
     if (type === 'loan') {
       const loanId = uid('loan');
       tx = { id: uid('tx'), type: 'income', amount, category: category || 'Loan', note, date, loanId, loanType: 'loan', createdAt: new Date().toISOString() };
@@ -794,14 +710,8 @@
       tx = { id: uid('tx'), type: type === 'income' ? 'income' : 'expense', amount, category, note, date, createdAt: new Date().toISOString() };
       state.transactions.push(tx);
     }
-
-    saveState();
-    updateLoanRepaymentField();
-    renderAll();
-    toast('Saved');
-    scheduleSync();
-    showPage('home');
-    const form = $('form'); if (form) form.reset(); if ($('date')) $('date').value = today;
+    saveState(); updateLoanRepaymentField(); renderAll(); toast('Saved'); scheduleSync();
+    showPage('home'); const form = $('form'); if (form) form.reset(); if ($('date')) $('date').value = today;
   }
 
   function wireTabs() {
@@ -810,14 +720,9 @@
     tabs.forEach(btn => btn.addEventListener('click', () => {
       const t = btn.dataset.type;
       document.querySelectorAll('.tabs [data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === t));
-      state.currentType = t;
-      populateCategories();
-      if (t === 'credit') updateLoanRepaymentField();
-      else { const h = $('loanSelectHolder'); if (h) { h.style.display = 'none'; h.innerHTML = ''; } }
-      const title = $('formTitle'); if (title) {
-        const titles = { expense: 'Add Expense', income: 'Add Income', loan: 'Record Loan', credit: 'Loan Repayment' };
-        title.textContent = titles[t] || 'Add Transaction';
-      }
+      state.currentType = t; populateCategories();
+      if (t === 'credit') updateLoanRepaymentField(); else { const h = $('loanSelectHolder'); if (h) { h.style.display = 'none'; h.innerHTML = ''; } }
+      const title = $('formTitle'); if (title) { const titles = { expense: 'Add Expense', income: 'Add Income', loan: 'Record Loan', credit: 'Loan Repayment' }; title.textContent = titles[t] || 'Add Transaction'; }
     }));
     if (state.currentType) document.querySelectorAll('.tabs [data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === state.currentType));
   }
@@ -836,17 +741,9 @@
     document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === id));
     document.querySelectorAll('[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === id));
     updateNavDisplay(id);
-
     if (id === 'home') renderAll();
-    if (id === 'transactions') {
-      txPageIndex = 0;
-      renderTransactionsPage(0);
-    }
-    if (id === 'settings') {
-      const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || '';
-      ensureCarryToggleExists();
-      const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver;
-    }
+    if (id === 'transactions') { txPageIndex = 0; renderTransactionsPage(0); }
+    if (id === 'settings') { const inp = $('syncUrlInput'); if (inp) inp.value = state.settings?.syncUrl || ''; ensureCarryToggleExists(); const carry = $('carryOverToggle'); if (carry) carry.checked = !!state.settings?.carryOver; }
   }
 
   function handleGlobalClicks(e) {
@@ -854,18 +751,14 @@
     if (page) { showPage(page.dataset.page); return; }
     const add = e.target.closest && e.target.closest('[data-add]');
     if (add) {
-      const type = add.dataset.add;
-      const tab = document.querySelector(`.tabs [data-type="${type}"]`);
+      const type = add.dataset.add; const tab = document.querySelector(`.tabs [data-type="${type}"]`);
       if (tab) tab.click(); else { state.currentType = type; populateCategories(); }
       showPage('add'); return;
     }
     const rem = e.target.closest && e.target.closest('[data-remove]');
     if (rem) {
       const id = rem.dataset.remove;
-      if (id) {
-        state.transactions = (state.transactions || []).filter(t => String(t.id) !== String(id));
-        saveState(); renderAll(); scheduleSync();
-      }
+      if (id) { state.transactions = (state.transactions || []).filter(t => String(t.id) !== String(id)); saveState(); renderAll(); scheduleSync(); }
       return;
     }
   }
@@ -878,20 +771,10 @@
   }
 
   function renderAll() {
-    greeting();
-    populateCategories();
-    renderHeaderStats();
-    renderTransactionsPage(txPageIndex);
-    renderLoanSummary();
-    updateLoanRepaymentField();
-    renderCategoriesList();
-    renderBudgetsList();
-    fillCategorySelects();
-    renderBudgetReportSummary();
-    renderGoalsList();
-    renderTrendChart();
+    greeting(); populateCategories(); renderHeaderStats(); renderLoanSummary(); updateLoanRepaymentField();
+    renderCategoriesList(); renderBudgetsList(); fillCategorySelects();
+    renderBudgetReportSummary(); renderGoalsList(); renderTrendChart();
     renderDashboardStats();
-
     if ($('month')) $('month').value = currentMonth();
     if ($('txCount')) $('txCount').textContent = `Activity (${(state.transactions||[]).length})`;
     if ($('txCountList')) $('txCountList').textContent = `Transactions (${(state.transactions||[]).length})`;
@@ -906,55 +789,24 @@
     document.addEventListener('click', handleGlobalClicks);
     document.getElementById('form')?.addEventListener('submit', saveTransactionForm);
     document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => showPage(b.dataset.page)));
-    document.querySelectorAll('.theme-toggle').forEach(btn => btn.addEventListener('click', () => {
-      state.settings = state.settings || {};
-      state.settings.theme = state.settings.theme === 'dark' ? 'light' : 'dark';
-      saveState(); applyTheme();
-    }));
+    document.querySelectorAll('.theme-toggle').forEach(btn => btn.addEventListener('click', () => { state.settings = state.settings || {}; state.settings.theme = state.settings.theme === 'dark' ? 'light' : 'dark'; saveState(); applyTheme(); }));
 
     $('addCategory')?.addEventListener('click', addCategoryFromUI);
     $('resetDefaultCategories')?.addEventListener('click', resetDefaultCategories);
     $('addBudget')?.addEventListener('click', addBudgetFromUI);
     $('clearBudgets')?.addEventListener('click', clearBudgets);
 
-    $('saveSyncUrl')?.addEventListener('click', () => {
-      const url = ($('syncUrlInput')?.value || '').trim();
-      state.settings = state.settings || {};
-      state.settings.syncUrl = url;
-      saveState();
-      toast(url ? 'Sync URL saved' : 'Sync URL cleared');
-    });
+    $('saveSyncUrl')?.addEventListener('click', () => { const url = ($('syncUrlInput')?.value || '').trim(); state.settings = state.settings || {}; state.settings.syncUrl = url; saveState(); toast(url ? 'Sync URL saved' : 'Sync URL cleared'); });
 
     $('testSync')?.addEventListener('click', async () => {
-      const url = ($('syncUrlInput')?.value || '').trim();
-      if (!url) { toast('Enter Apps Script URL first'); return; }
-      state.settings = state.settings || {};
-      state.settings.syncUrl = url;
-      saveState();
-      try {
-        const ping = await api('ping', {});
-        if (ping && (ping.ok || ping.message)) {
-          try {
-            await queueSync();
-            toast('Test sync done');
-          } catch (e) {
-            toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e)));
-          }
-        } else {
-          toast('Ping did not return expected response');
-        }
-      } catch (e) {
-        console.warn('ping failed', e);
-        toast('Ping failed: ' + (e && e.message ? e.message : String(e)));
-      }
+      const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
+      state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
+      try { const ping = await api('ping', {}); if (ping && (ping.ok || ping.message)) { try { await queueSync(); toast('Test sync done'); } catch (e) { toast('Test sync (push) failed: ' + (e && e.message ? e.message : String(e))); } } else { toast('Ping did not return expected response'); } } catch (e) { console.warn('ping failed', e); toast('Ping failed: ' + (e && e.message ? e.message : String(e))); }
     });
 
     $('pullFromSheets')?.addEventListener('click', async () => {
-      const url = ($('syncUrlInput')?.value || '').trim();
-      if (!url) { toast('Enter Apps Script URL first'); return; }
-      state.settings = state.settings || {};
-      state.settings.syncUrl = url;
-      saveState();
+      const url = ($('syncUrlInput')?.value || '').trim(); if (!url) { toast('Enter Apps Script URL first'); return; }
+      state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
       try {
         const res = await api('getAll', {});
         if (res && res.data) {
@@ -963,55 +815,26 @@
           state.categories = res.data.categories || state.categories || [];
           state.budgets = res.data.budgets || state.budgets || [];
           state.goals = res.data.goals || state.goals || [];
-          saveState();
-          renderAll();
-          toast('Pulled from sheet');
-        } else {
-          toast('No data from sheet');
-        }
-      } catch (e) {
-        console.warn('pull failed', e);
-        toast('Pull failed: ' + (e && e.message ? e.message : String(e)));
-      }
+          saveState(); renderAll(); toast('Pulled from sheet');
+        } else toast('No data from sheet');
+      } catch (e) { console.warn('pull failed', e); toast('Pull failed: ' + (e && e.message ? e.message : String(e))); }
     });
 
-    $('clear')?.addEventListener('click', () => {
-      if (!confirm('Clear all transactions?')) return;
-      state.transactions = [];
-      state.loans = [];
-      saveState();
-      scheduleSync();
-      renderAll();
-      toast('Cleared');
-    });
-
+    $('clear')?.addEventListener('click', () => { if (!confirm('Clear all transactions?')) return; state.transactions = []; state.loans = []; saveState(); scheduleSync(); renderAll(); toast('Cleared'); });
     $('cancelAdd')?.addEventListener('click', () => showPage('home'));
+    $('loadMoreTx')?.addEventListener('click', () => { txPageIndex = txPageIndex + 1; renderTransactionsPage(txPageIndex); });
 
-    $('loadMoreTx')?.addEventListener('click', () => {
-      txPageIndex = txPageIndex + 1;
-      renderTransactionsPage(txPageIndex);
-    });
-
-    window.addEventListener('resize', () => {
-      updateNavDisplay(document.querySelector('.page.active')?.id || 'home');
-      renderTrendChart();
-    });
+    window.addEventListener('resize', () => { updateNavDisplay(document.querySelector('.page.active')?.id || 'home'); renderTrendChart(); });
   }
 
   function ensureCarryToggleExists() {
     if ($('carryOverToggle')) return;
-
     const themePanel = Array.from(document.querySelectorAll('#settings .panel')).find(panel => {
-      const h3 = panel.querySelector('h3');
-      return h3 && h3.textContent && h3.textContent.trim().toLowerCase() === 'theme';
+      const h3 = panel.querySelector('h3'); return h3 && h3.textContent && h3.textContent.trim().toLowerCase() === 'theme';
     });
-
     const parent = themePanel ? themePanel.parentElement : $('settings');
     if (!parent) return;
-
-    const panel = document.createElement('div');
-    panel.className = 'panel';
-    panel.style.marginTop = '12px';
+    const panel = document.createElement('div'); panel.className = 'panel'; panel.style.marginTop = '12px';
     panel.innerHTML = `
       <h3>Carry Over</h3>
       <div style="display:flex;gap:10px;align-items:center;">
@@ -1020,36 +843,12 @@
       </div>
       <small class="muted">When enabled, positive remaining money for the month is added automatically as an income transaction at the start of next month.</small>
     `;
-
-    if (themePanel && themePanel.parentElement) {
-      themePanel.parentElement.insertBefore(panel, themePanel.nextSibling);
-    } else {
-      parent.appendChild(panel);
-    }
-
-    const carry = $('carryOverToggle');
-    if (carry) {
-      carry.checked = !!state.settings?.carryOver;
-      carry.addEventListener('change', (e) => {
-        state.settings = state.settings || {};
-        state.settings.carryOver = !!e.target.checked;
-        saveState();
-        toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled');
-      });
-    }
+    if (themePanel && themePanel.parentElement) themePanel.parentElement.insertBefore(panel, themePanel.nextSibling); else parent.appendChild(panel);
+    const carry = $('carryOverToggle'); if (carry) { carry.checked = !!state.settings?.carryOver; carry.addEventListener('change', (e) => { state.settings = state.settings || {}; state.settings.carryOver = !!e.target.checked; saveState(); toast(state.settings.carryOver ? 'Carry Over enabled' : 'Carry Over disabled'); }); }
   }
 
-  function firstDayOfMonthISO(monthStr) {
-    return `${monthStr}-01`;
-  }
-
-  function prevMonthKey(monthKey) {
-    const [y, m] = monthKey.split('-').map(Number);
-    let py = y;
-    let pm = m - 1;
-    if (pm < 1) { pm = 12; py = y - 1; }
-    return `${py}-${String(pm).padStart(2,'0')}`;
-  }
+  function firstDayOfMonthISO(monthStr) { return `${monthStr}-01`; }
+  function prevMonthKey(monthKey) { const [y,m] = monthKey.split('-').map(Number); let py=y, pm=m-1; if (pm<1){ pm=12; py=y-1; } return `${py}-${String(pm).padStart(2,'0')}`; }
 
   function applyCarryOverIfNeeded() {
     try {
@@ -1061,35 +860,27 @@
       const t = totals(rows);
       const remainingMoney = (t.income || 0) - (t.expense || 0) - (t.loan || 0) - (t.credit || 0);
       if (remainingMoney > 0) {
-        const tx = {
-          id: uid('tx'),
-          type: 'income',
-          amount: Number(remainingMoney),
-          category: 'Carry Over',
-          note: `Carry over from ${prev}`,
-          date: firstDayOfMonthISO(nowMonth),
-          createdAt: new Date().toISOString(),
-          autoCarry: true
-        };
+        const tx = { id: uid('tx'), type: 'income', amount: Number(remainingMoney), category: 'Carry Over', note: `Carry over from ${prev}`, date: firstDayOfMonthISO(nowMonth), createdAt: new Date().toISOString(), autoCarry: true };
         state.transactions.push(tx);
         state.lastCarryMonth = nowMonth;
         saveState();
         scheduleSync();
         toast(`Carried over ${money(remainingMoney)} to ${nowMonth}`);
-      } else {
-        state.lastCarryMonth = nowMonth;
-        saveState();
-      }
-    } catch (e) {
-      console.warn('carry over failed', e);
-    }
+      } else { state.lastCarryMonth = nowMonth; saveState(); }
+    } catch (e) { console.warn('carry over failed', e); }
+  }
+
+  function refreshBudgetsIfNeeded() {
+    const nowMonth = currentMonth();
+    if (state.budgetsLastRefreshedMonth === nowMonth) return;
+    state.budgetsLastRefreshedMonth = nowMonth;
+    saveState();
+    renderBudgetReportSummary();
+    toast(`Budgets refreshed for ${nowMonth}`);
   }
 
   function initPaginationControls() {
-    const loadBtn = $('loadMoreTx');
-    if (!loadBtn) return;
-    const total = (state.transactions || []).length;
-    if (total > PAGE_SIZE) loadBtn.style.display = 'inline-block'; else loadBtn.style.display = 'none';
+    const loadBtn = $('loadMoreTx'); if (!loadBtn) return; const total = (state.transactions || []).length; if (total > PAGE_SIZE) loadBtn.style.display = 'inline-block'; else loadBtn.style.display = 'none';
   }
 
   function init() {
@@ -1100,37 +891,22 @@
     state.loans = Array.isArray(state.loans) ? state.loans : [];
     state.goals = Array.isArray(state.goals) ? state.goals : [];
     if (!state.settings) state.settings = { theme: 'light', syncUrl: '', carryOver: false };
-
     repairTransactionIds();
     applyTheme();
     wireEvents();
     wireTabs();
     applyCarryOverIfNeeded();
+    refreshBudgetsIfNeeded();
     renderAll();
     initPaginationControls();
-    if (document.querySelector('.page.active')?.id === 'transactions') {
-      txPageIndex = 0; renderTransactionsPage(0);
-    }
+    if (document.querySelector('.page.active')?.id === 'transactions') { txPageIndex = 0; renderTransactionsPage(0); }
     showPage('home');
   }
 
-  // expose for debugging and to avoid "renderHeaderStats is not defined" errors
+  // expose helpers and avoid external "not defined" errors
   window.moneyflow = window.moneyflow || {};
-  Object.assign(window.moneyflow, {
-    state,
-    save: () => saveState(),
-    renderAll,
-    renderHeaderStats,
-    renderBudgetReportSummary,
-    renderTransactionsPage,
-    applyTheme,
-    updateLoanRepaymentField,
-    scheduleSync
-  });
+  Object.assign(window.moneyflow, { state, save: () => saveState(), renderAll, renderHeaderStats, renderBudgetReportSummary, renderTransactionsPage, applyTheme, updateLoanRepaymentField, scheduleSync });
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once:true }); else init();
+
 })();
