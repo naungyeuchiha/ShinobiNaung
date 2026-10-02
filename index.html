@@ -62,42 +62,20 @@
 
         <div class="cols">
           <div>
-            <div id="transactionsPanel" class="panel" aria-live="polite">
-              <div class="head" style="align-items:center;">
-                <h3 id="txCount">Activity (0)</h3>
-                <div style="display:flex;gap:8px;align-items:center">
-                  <label class="small muted" for="month">Month</label>
-                  <input id="month" type="month" />
-                </div>
-              </div>
+            <!-- Removed the Activities panel from Home (History remains in Transactions page) -->
 
-              <div style="height:12px"></div>
-
-              <div id="recent" class="muted">Your recent activity will appear here.</div>
-
-              <div style="height:12px"></div>
-
-              <div class="table">
-                <table>
-                  <thead><tr><th>Date</th><th>Category / Note</th><th>Amount</th><th></th></tr></thead>
-                  <tbody id="recentRows"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <div style="height:12px"></div>
-
-            <!-- NOTE: Budget summary moved to Dashboard per request; keep placeholder hidden on Home -->
-            <div id="budgetPanel-home-placeholder" class="panel" style="display:none;">
+            <!-- Put Budget report here on Home (moved from Dashboard) -->
+            <div id="budgetPanel" class="panel">
               <h3>Budgets</h3>
               <div id="budgetReport" class="muted">No budgets set</div>
             </div>
+
+            <div style="height:12px"></div>
+
+            <!-- keep a placeholder for transaction add shortcuts etc. -->
           </div>
 
           <aside>
-            <!-- Loan Analysis removed from Home and moved to Dashboard -->
-            <div style="height:12px"></div>
-
             <div id="dailyBudgets" class="panel">
               <h4>Daily Budgets</h4>
               <div class="muted">No budgets set</div>
@@ -105,8 +83,7 @@
 
             <div style="height:12px"></div>
 
-            <!-- Goals placeholder on Home (moved to Dashboard) -->
-            <div id="goalsPanel-home-placeholder" class="panel" style="display:none">
+            <div id="goalsPanel" class="panel">
               <h4>Goals</h4>
               <div id="goalsList" class="muted">No goals yet</div>
             </div>
@@ -191,29 +168,28 @@
 
         <div class="cols">
           <div>
-            <div id="budgetPanel" class="panel">
+            <div id="budgetPanel-dashboard-placeholder" class="panel" style="display:none;">
               <h3>Budgets</h3>
-              <div id="budgetReport" class="muted">No budgets set</div>
+              <div id="budgetReportDashboard" class="muted">No budgets set</div>
             </div>
           </div>
 
           <aside>
-            <!-- Loan Analysis moved to Dashboard -->
             <div id="loanBI" class="panel" aria-live="polite">
               <h4>Loan Analysis</h4>
             </div>
 
             <div style="height:12px"></div>
 
-            <div id="goalsPanel" class="panel">
+            <div id="goalsPanel-dashboard-placeholder" class="panel" style="display:none">
               <h4>Goals</h4>
-              <div id="goalsList" class="muted">No goals yet</div>
+              <div id="goalsListDashboard" class="muted">No goals yet</div>
             </div>
           </aside>
         </div>
       </section>
 
-      <!-- TRANSACTIONS -->
+      <!-- TRANSACTIONS (History) -->
       <section id="transactions" class="page" role="region" aria-labelledby="transactions-heading">
         <h2 id="transactions-heading" class="sr-only">Transactions</h2>
         <div class="panel head" style="display:flex;justify-content:space-between;align-items:center;">
@@ -228,6 +204,10 @@
             <thead><tr><th>Date</th><th>Activity</th><th>Amount</th><th></th></tr></thead>
             <tbody id="txRows"></tbody>
           </table>
+
+          <div id="txPagination" style="padding:10px 8px;text-align:center;">
+            <button id="loadMoreTx" class="small">Load more</button>
+          </div>
         </div>
       </section>
 
@@ -248,10 +228,20 @@
           </div>
         </div>
 
+        <!-- Carry Over setting -->
+        <div class="panel" style="margin-top:12px;">
+          <h3>Carry Over</h3>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <label for="carryOverToggle" style="margin:0;font-weight:600">Carry remaining to next month</label>
+            <input id="carryOverToggle" type="checkbox" />
+          </div>
+          <small class="muted">When enabled, positive remaining money for the month is added automatically as an income transaction at the start of next month.</small>
+        </div>
+
         <!-- Categories management -->
         <div class="panel" style="margin-top:12px;">
           <h3>Categories</h3>
-          <div id="categoriesList" class="muted">Manage categories in-app</div>
+          <div id="categoriesList" class="settings-list muted">No categories</div>
 
           <div style="margin-top:10px" class="two">
             <input id="newCategoryName" placeholder="Name" />
@@ -264,7 +254,7 @@
           </div>
           <div style="display:flex;gap:8px;margin-top:8px;">
             <button id="addCategory" class="primary">Add category</button>
-            <button id="resetDefaultCategories">Reset defaults</button>
+            <button id="resetDefaultCategories">Clear categories</button>
           </div>
         </div>
 
@@ -272,7 +262,7 @@
         <div class="panel" style="margin-top:12px;">
           <h3>Budgets</h3>
 
-          <div id="budgetsList" class="muted">Manage monthly budgets</div>
+          <div id="budgetsList" class="settings-list muted">Manage monthly budgets</div>
 
           <div style="margin-top:10px" class="two">
             <select id="budgetCategorySelect"></select>
