@@ -22,7 +22,6 @@
       <div style="display:flex;align-items:center;gap:12px">
         <div id="greet" class="muted" aria-live="polite">GOOD DAY</div>
 
-        <!-- theme toggles - class based so multiple toggles work -->
         <button class="theme-toggle" aria-label="Toggle theme">☾</button>
 
         <nav class="top-nav" aria-label="Primary navigation">
@@ -62,19 +61,15 @@
 
         <div class="cols">
           <div>
-            <!-- Budgets panel moved to Home -->
             <div id="budgetPanel" class="panel">
               <h3>Budgets</h3>
               <div id="budgetReport" class="muted">No budgets set</div>
             </div>
-
             <div style="height:12px"></div>
           </div>
 
           <aside>
-            <!-- Daily Budgets panel removed from Home as requested -->
             <div style="height:12px"></div>
-            <!-- Goals removed from Home (still in Dashboard) -->
           </aside>
         </div>
       </section>
@@ -216,7 +211,7 @@
           </div>
         </div>
 
-        <!-- Month Filter (From-To) -->
+        <!-- Month Filter -->
         <div class="panel" style="margin-top:12px;">
           <h3>Month Filter</h3>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -229,7 +224,7 @@
           <small class="muted">Filter transactions and reports by month range (inclusive). Leave empty to show current month.</small>
         </div>
 
-        <!-- Carry Over setting -->
+        <!-- Carry Over -->
         <div class="panel" style="margin-top:12px;">
           <h3>Carry Over</h3>
           <div style="display:flex;gap:10px;align-items:center;">
@@ -239,7 +234,7 @@
           <small class="muted">When enabled, positive remaining money for the month is added automatically as an income transaction at the start of next month.</small>
         </div>
 
-        <!-- Categories management -->
+        <!-- Categories -->
         <div class="panel" style="margin-top:12px;">
           <h3>Categories</h3>
           <div id="categoriesList" class="settings-list muted">No categories</div>
@@ -259,7 +254,7 @@
           </div>
         </div>
 
-        <!-- Budgets management -->
+        <!-- Budgets -->
         <div class="panel" style="margin-top:12px;">
           <h3>Budgets</h3>
 
@@ -275,14 +270,14 @@
           </div>
         </div>
 
-        <!-- Google Sheets sync -->
+        <!-- Sheets sync -->
         <div class="panel" style="margin-top:12px;">
           <h3>Google Sheets sync</h3>
           <input id="syncUrlInput" type="url" placeholder="https://script.google.com/..." />
           <div class="sync" style="margin-top:8px;">
             <button id="saveSyncUrl">Save</button>
             <button id="testSync">Test</button>
-            <button id="pullFromSheets">Pull</button>
+            <button id="syncData">Sync</button>
           </div>
           <small class="muted">URL stored locally in localStorage.</small>
         </div>
