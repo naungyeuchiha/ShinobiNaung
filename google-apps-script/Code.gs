@@ -10,12 +10,12 @@
 
 const SPREADSHEET_ID = ''; // set to a spreadsheet ID or leave empty to use active spreadsheet
 
-// Table headers
+// Table headers (ensure id column exists for categories, budgets, goals)
 const TRANSACTION_HEADERS = ['id','type','amount','date','category','note','loanId','loanType','createdAt'];
 const LOAN_HEADERS = ['id','name','principal','remaining','date','note','createdAt'];
-const CATEGORY_HEADERS = ['name','type','createdAt'];
-const BUDGET_HEADERS = ['category','amount'];
-const GOAL_HEADERS = ['name','target','saved'];
+const CATEGORY_HEADERS = ['id','name','type','createdAt'];
+const BUDGET_HEADERS = ['id','category','amount','createdAt'];
+const GOAL_HEADERS = ['id','title','target','progress','note','createdAt'];
 
 /* ---------- Utilities ---------- */
 
@@ -146,6 +146,7 @@ function normalizeLoan(x) {
 function normalizeCategory(x) {
   if (!x) return null;
   return {
+    id: String(x.id || x.name || ''),
     name: String(x.name || '').trim(),
     type: String(x.type || 'expense'),
     createdAt: toMillis(x.createdAt)
@@ -241,8 +242,8 @@ function readAll() {
   const transactions = readRows('Transactions', TRANSACTION_HEADERS).map(normalizeTransaction).filter(Boolean);
   const loans = readRows('Loans', LOAN_HEADERS).map(normalizeLoan).filter(Boolean);
   const categories = uniqueCategories(readRows('Categories', CATEGORY_HEADERS));
-  const budgets = readRows('Budgets', BUDGET_HEADERS).map(r => ({ category: String(r.category || ''), amount: Number(r.amount || 0) }));
-  const goals = readRows('Goals', GOAL_HEADERS).map(r => ({ name: String(r.name || ''), target: Number(r.target || 0), saved: Number(r.saved || 0) }));
+  const budgets = readRows('Budgets', BUDGET_HEADERS).map(r => ({ id: String(r.id || ''), category: String(r.category || ''), amount: Number(r.amount || 0), createdAt: Number(r.createdAt || Date.now()) }));
+  const goals = readRows('Goals', GOAL_HEADERS).map(r => ({ id: String(r.id || ''), title: String(r.title || r.name || ''), target: Number(r.target || 0), progress: Number(r.progress || r.saved || 0), note: String(r.note || ''), createdAt: Number(r.createdAt || Date.now()) }));
   const d = { transactions, loans, categories, budgets, goals };
   d.revision = fingerprint(d);
   return d;
@@ -252,8 +253,16 @@ function writeAll(payload) {
   const transactions = (payload.transactions || []).map(normalizeTransaction).filter(Boolean);
   const computedLoans = computeLoansFromTransactions(transactions || []);
   const categories = uniqueCategories(payload.categories || []);
-  const budgets = (payload.budgets || []).map(item => [String(item.category || ''), Number(item.amount || 0)]);
-  const goals = (payload.goals || []).map(item => [String(item.name || ''), Number(item.target || 0), Number(item.saved || 0)]);
+  const budgetRows = (payload.budgets || []).map(item => {
+    const id = item.id || ('bud-' + (String(item.category || '').replace(/\s+/g,'-').toLowerCase()) + '-' + Date.now().toString(36));
+    return [id, String(item.category || ''), Number(item.amount || 0), Number(item.createdAt || Date.now())];
+  });
+  const goalRows = (payload.goals || []).map(item => {
+    const id = item.id || ('goal-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6));
+    const title = item.title || item.name || '';
+    const progress = Number(item.progress || item.saved || 0);
+    return [id, title, Number(item.target || 0), progress, String(item.note || ''), Number(item.createdAt || Date.now())];
+  });
 
   writeTable('Transactions', TRANSACTION_HEADERS, transactions.map(tx => [
     tx.id, tx.type, tx.amount, tx.date, tx.category, tx.note, tx.loanId, tx.loanType, tx.createdAt
@@ -263,9 +272,9 @@ function writeAll(payload) {
     ln.id, ln.name, ln.principal, ln.remaining, ln.date, ln.note, ln.createdAt
   ]));
 
-  writeTable('Categories', CATEGORY_HEADERS, categories.map(c => [c.name, c.type, c.createdAt]));
-  writeTable('Budgets', BUDGET_HEADERS, budgets);
-  writeTable('Goals', GOAL_HEADERS, goals);
+  writeTable('Categories', CATEGORY_HEADERS, categories.map(c => [c.id || '', c.name || '', c.type || '', Number(c.createdAt || Date.now())]));
+  writeTable('Budgets', BUDGET_HEADERS, budgetRows);
+  writeTable('Goals', GOAL_HEADERS, goalRows);
 }
 
 function writeTable(name, headers, rows) {
