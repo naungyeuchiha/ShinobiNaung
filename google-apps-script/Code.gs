@@ -36,25 +36,52 @@ function fingerprint(obj) {
   return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw, Utilities.Charset.UTF_8));
 }
 
+function normalizeDateString(v) {
+  if (!v && v !== 0) return '';
+  if (typeof v === 'number') {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return '';
+  }
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  const s = String(v).trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return String(s).slice(0, 10);
+}
+
+function toMillis(v) {
+  if (v === null || typeof v === 'undefined' || v === '') return Date.now();
+  if (typeof v === 'number') return v;
+  const n = Number(v);
+  if (!isNaN(n) && isFinite(n)) return n;
+  const parsed = Date.parse(String(v));
+  return isNaN(parsed) ? Date.now() : parsed;
+}
+
 function formatDate(v) {
   if (!v) return '';
   if (Object.prototype.toString.call(v) === '[object Date]') {
     return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
-  return String(v).slice(0,10);
+  return normalizeDateString(v);
 }
 
 /* ---------- Sheet helpers ---------- */
 
 function sheet(name, headers) {
   const spreadsheet = ss();
+  if (!spreadsheet) return null;
   let sh = spreadsheet.getSheetByName(name);
   if (!sh) {
     sh = spreadsheet.insertSheet(name);
     if (headers && headers.length) sh.getRange(1,1,1,headers.length).setValues([headers]);
     sh.setFrozenRows(1);
   } else {
-    // Ensure header row exists and at least headers.length columns
     try {
       const existing = sh.getRange(1,1,1,Math.max(sh.getLastColumn(), headers ? headers.length : 0)).getValues()[0] || [];
       if (!existing || existing.length < (headers ? headers.length : 0)) {
@@ -70,6 +97,7 @@ function sheet(name, headers) {
 
 function readRows(name, headers) {
   const sh = sheet(name, headers);
+  if (!sh) return [];
   const vals = sh.getDataRange().getValues();
   if (!vals || vals.length < 2) return [];
   const data = [];
@@ -98,7 +126,7 @@ function normalizeTransaction(x) {
     note: String(x.note || ''),
     loanId: x.hasOwnProperty('loanId') && x.loanId !== null ? String(x.loanId) : '',
     loanType: String(x.loanType || ''),
-    createdAt: x.createdAt ? (new Date(x.createdAt)).toISOString() : (new Date()).toISOString()
+    createdAt: toMillis(x.createdAt)
   };
 }
 
@@ -111,7 +139,7 @@ function normalizeLoan(x) {
     remaining: Number(x.remaining || 0),
     date: formatDate(x.date),
     note: String(x.note || ''),
-    createdAt: x.createdAt ? (new Date(x.createdAt)).toISOString() : (new Date()).toISOString()
+    createdAt: toMillis(x.createdAt)
   };
 }
 
@@ -120,7 +148,7 @@ function normalizeCategory(x) {
   return {
     name: String(x.name || '').trim(),
     type: String(x.type || 'expense'),
-    createdAt: x.createdAt ? (new Date(x.createdAt)).toISOString() : (new Date()).toISOString()
+    createdAt: toMillis(x.createdAt)
   };
 }
 
@@ -140,8 +168,8 @@ function uniqueCategories(xs) {
 function computeLoansFromTransactions(transactions) {
   const txs = (transactions || []).map(t => Object.assign({}, t));
   txs.sort((a,b) => {
-    const ta = a.createdAt ? new Date(a.createdAt).getTime() : (a.date ? new Date(a.date).getTime() : 0);
-    const tb = b.createdAt ? new Date(b.createdAt).getTime() : (b.date ? new Date(b.date).getTime() : 0);
+    const ta = toMillis(a.createdAt) || (a.date ? Date.parse(a.date) : 0);
+    const tb = toMillis(b.createdAt) || (b.date ? Date.parse(b.date) : 0);
     return ta - tb;
   });
 
@@ -156,7 +184,7 @@ function computeLoansFromTransactions(transactions) {
     const isRepayment = (type === 'expense') && !!loanId;
 
     if (isLoanOrigination) {
-      const id = loanId || `loan-${tx.id || ('t' + Math.abs(new Date(tx.createdAt || tx.date || Date.now()).getTime()))}`;
+      const id = loanId || `loan-${tx.id || ('t' + Math.abs(Date.now()))}`;
       if (!loansById[id]) {
         loansById[id] = {
           id,
@@ -165,7 +193,7 @@ function computeLoansFromTransactions(transactions) {
           remaining: 0,
           date: formatDate(tx.date),
           note: tx.note || '',
-          createdAt: tx.createdAt || (new Date()).toISOString()
+          createdAt: toMillis(tx.createdAt)
         };
       }
       const amt = Number(tx.amount || 0);
@@ -183,7 +211,7 @@ function computeLoansFromTransactions(transactions) {
           remaining: 0,
           date: '',
           note: '',
-          createdAt: tx.createdAt || (new Date()).toISOString()
+          createdAt: toMillis(tx.createdAt)
         };
       }
       const amt = Number(tx.amount || 0);
@@ -200,7 +228,7 @@ function computeLoansFromTransactions(transactions) {
       remaining: Number(l.remaining || 0),
       date: formatDate(l.date),
       note: String(l.note || ''),
-      createdAt: l.createdAt ? new Date(l.createdAt).toISOString() : new Date().toISOString()
+      createdAt: Number(l.createdAt || Date.now())
     };
   });
 
@@ -222,10 +250,7 @@ function readAll() {
 
 function writeAll(payload) {
   const transactions = (payload.transactions || []).map(normalizeTransaction).filter(Boolean);
-
-  // Compute loans server-side (authoritative)
   const computedLoans = computeLoansFromTransactions(transactions || []);
-
   const categories = uniqueCategories(payload.categories || []);
   const budgets = (payload.budgets || []).map(item => [String(item.category || ''), Number(item.amount || 0)]);
   const goals = (payload.goals || []).map(item => [String(item.name || ''), Number(item.target || 0), Number(item.saved || 0)]);
@@ -234,23 +259,18 @@ function writeAll(payload) {
     tx.id, tx.type, tx.amount, tx.date, tx.category, tx.note, tx.loanId, tx.loanType, tx.createdAt
   ]));
 
-  // Write Loans (computed)
   writeTable('Loans', LOAN_HEADERS, computedLoans.map(ln => [
     ln.id, ln.name, ln.principal, ln.remaining, ln.date, ln.note, ln.createdAt
   ]));
 
-  // Write Categories
   writeTable('Categories', CATEGORY_HEADERS, categories.map(c => [c.name, c.type, c.createdAt]));
-
-  // Write Budgets
   writeTable('Budgets', BUDGET_HEADERS, budgets);
-
-  // Write Goals
   writeTable('Goals', GOAL_HEADERS, goals);
 }
 
 function writeTable(name, headers, rows) {
   const sh = sheet(name, headers);
+  if (!sh) return;
   sh.clearContents();
   if (headers && headers.length) sh.getRange(1,1,1,headers.length).setValues([headers]);
   if (rows && rows.length) {
@@ -287,10 +307,8 @@ function doPost(e) {
       return out({ ok: true, data: status() });
     }
     if (action === 'replaceAll' || action === 'writeAll') {
-      // payload.payload or payload.body or payload itself may contain the data
       const data = payload.payload || payload.body || payload;
       writeAll(data);
-      // Return the authoritative dataset (transactions, computed loans, categories, budgets, goals)
       const result = readAll();
       return out({ ok: true, message: 'Replaced data', data: result });
     }
