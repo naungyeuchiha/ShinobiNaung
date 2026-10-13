@@ -405,8 +405,7 @@
   }
 
   function renderGoalsList() {
-    const host = $('goalsList');
-    if (!host) return;
+    const host = $('goalsList'); if (!host) return;
     const gs = state.goals || [];
     if (!gs.length) { host.innerHTML = `<div class="muted">No goals yet</div>`; return; }
 
@@ -729,6 +728,65 @@
     }
   }
 
+  function mergeCollections(localArr, remoteArr, key = 'id') {
+    const out = [];
+    const map = {};
+    (remoteArr || []).forEach(r => { if (r && r[key] !== undefined && r[key] !== null) map[String(r[key])] = r; else out.push(r); });
+    (localArr || []).forEach(l => {
+      if (l && l[key] !== undefined && l[key] !== null) {
+        const id = String(l[key]);
+        if (!map[id]) map[id] = l; // keep local if remote missing
+      } else {
+        out.push(l);
+      }
+    });
+    // push mapped values first, then orphans
+    for (const k in map) out.push(map[k]);
+    return out;
+  }
+
+  async function doTwoWaySync() {
+    if (!state.settings || !state.settings.syncUrl) { toast('Add Apps Script URL first'); return; }
+    toast('Starting sync...');
+    try {
+      // fetch remote
+      const remote = await api('getAll', {});
+      const remoteData = remote && remote.data ? remote.data : {};
+
+      // merge collections by id where possible
+      const merged = {};
+      merged.transactions = mergeCollections(state.transactions || [], remoteData.transactions || [], 'id');
+      merged.categories = mergeCollections(state.categories || [], remoteData.categories || [], 'id');
+      merged.budgets = mergeCollections(state.budgets || [], remoteData.budgets || [], 'id');
+      merged.goals = mergeCollections(state.goals || [], remoteData.goals || [], 'id');
+      merged.loans = mergeCollections(state.loans || [], remoteData.loans || [], 'id');
+
+      // set merged state
+      state.transactions = merged.transactions;
+      state.categories = merged.categories;
+      state.budgets = merged.budgets;
+      state.goals = merged.goals;
+      state.loans = merged.loans;
+
+      saveState();
+
+      // push merged back to backend
+      const pushRes = await api('replaceAll', { transactions: state.transactions, categories: state.categories, budgets: state.budgets, goals: state.goals, loans: state.loans });
+      if (pushRes && pushRes.ok === false) {
+        toast('Sync push failed');
+        console.warn('pushRes', pushRes);
+      } else {
+        toast('Sync completed');
+      }
+
+      // refresh UI
+      renderAll();
+    } catch (e) {
+      console.warn('doTwoWaySync failed', e);
+      toast('Sync error: ' + (e && e.message ? e.message : String(e)));
+    }
+  }
+
   async function queueSync() {
     if (!state.settings || !state.settings.syncUrl) return;
     try {
@@ -986,6 +1044,15 @@
         }
       });
 
+      // NEW: two-way sync button (pull + push merged data)
+      $('syncData')?.addEventListener('click', async () => {
+        const url = ($('syncUrlInput')?.value || '').trim();
+        if (!url) { toast('Enter Apps Script URL first'); return; }
+        state.settings = state.settings || {}; state.settings.syncUrl = url; saveState();
+        await doTwoWaySync();
+      });
+
+      // pull only (kept for compatibility)
       $('pullFromSheets')?.addEventListener('click', async () => {
         const url = ($('syncUrlInput')?.value || '').trim();
         if (!url) { toast('Enter Apps Script URL first'); return; }
